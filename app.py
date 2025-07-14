@@ -4,7 +4,7 @@ from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-import random
+import random # Aunque random no se usa para historial, se mantiene si es para otros fines
 import os
 import re
 import json
@@ -29,8 +29,12 @@ HISTORICAL_RATES_FILE = 'historical_rates.json'
 def load_data(file_path, default_data):
     """Carga datos desde un archivo JSON, o devuelve datos predeterminados si el archivo no existe."""
     if os.path.exists(file_path):
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: Archivo {file_path} corrupto o vacío. Usando datos predeterminados.")
+            return default_data
     return default_data
 
 # Función para guardar datos en un archivo JSON
@@ -44,25 +48,16 @@ current_rates = load_data(CURRENT_RATES_FILE, {
     "usd": DEFAULT_USD_RATE,
     "eur": DEFAULT_EUR_RATE,
     "ut": FIXED_UT_RATE,
-    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " (predeterminado)"
+    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " (predeterminado)",
+    "usd_change_percent": 0.0, # Añadido para el porcentaje de cambio
+    "eur_change_percent": 0.0  # Añadido para el porcentaje de cambio
 })
+
+# Cargar el historial. Si el archivo no existe o está vacío, historical_rates_data será una lista vacía.
 historical_rates_data = load_data(HISTORICAL_RATES_FILE, [])
 
-# Inicializar datos históricos si están vacíos (con datos simulados para los últimos 30 días)
-if not historical_rates_data:
-    today = datetime.now()
-    for i in range(30):
-        date = today - timedelta(days=i)
-        sim_usd = round(DEFAULT_USD_RATE + (random.random() - 0.5) * 0.5, 2)
-        sim_eur = round(DEFAULT_EUR_RATE + (random.random() - 0.5) * 0.6, 2)
-        historical_rates_data.append({
-            "date": date.strftime("%d de %B de %Y"),
-            "usd": sim_usd,
-            "eur": sim_eur
-        })
-    # Asegurarse de que el historial esté ordenado por fecha descendente
-    historical_rates_data.sort(key=lambda x: datetime.strptime(x['date'], "%d de %B de %Y"), reverse=True)
-    save_data(HISTORICAL_RATES_FILE, historical_rates_data)
+# Eliminado: el bloque `if not historical_rates_data:` que generaba datos simulados.
+# Ahora, el historial solo se llenará con actualizaciones reales.
 
 def fetch_and_update_bcv_rates():
     """
@@ -110,20 +105,45 @@ def fetch_and_update_bcv_rates():
         if usd_rate is None or eur_rate is None:
             raise ValueError("No se pudieron encontrar las tasas de USD o EUR en la página del BCV. La estructura HTML pudo haber cambiado.")
 
+        # Calcular el porcentaje de cambio
+        usd_change_percent = 0.0
+        eur_change_percent = 0.0
+
+        # Buscar la tasa del día anterior en el historial
+        previous_day_rate_usd = None
+        previous_day_rate_eur = None
+        
+        # Iterar sobre el historial para encontrar la tasa más reciente de un día anterior
+        # El historial está ordenado de más reciente a más antiguo
+        # Se busca la primera entrada que no sea la de hoy
+        today_date_str_for_history_check = datetime.now().strftime("%d de %B de %Y")
+        for entry in historical_rates_data:
+            if entry.get("date") != today_date_str_for_history_check:
+                previous_day_rate_usd = entry.get("usd")
+                previous_day_rate_eur = entry.get("eur")
+                break # Una vez que encontramos la primera entrada de un día anterior, salimos
+
+        if previous_day_rate_usd is not None and previous_day_rate_usd != 0:
+            usd_change_percent = ((usd_rate - previous_day_rate_usd) / previous_day_rate_usd) * 100
+        if previous_day_rate_eur is not None and previous_day_rate_eur != 0:
+            eur_change_percent = ((eur_rate - previous_day_rate_eur) / previous_day_rate_eur) * 100
+
         # Actualiza las tasas actuales en memoria y en el archivo
         current_rates = {
             "usd": usd_rate,
             "eur": eur_rate,
             "ut": FIXED_UT_RATE, # La UT permanece fija
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "usd_change_percent": round(usd_change_percent, 2), # Añadir el porcentaje redondeado
+            "eur_change_percent": round(eur_change_percent, 2)  # Añadir el porcentaje redondeado
         }
         save_data(CURRENT_RATES_FILE, current_rates)
 
         # Actualiza el historial de tasas si la fecha es diferente a la última guardada
-        today_date_str = datetime.now().strftime("%d de %B de %Y")
-        if not historical_rates_data or historical_rates_data[0]["date"] != today_date_str:
+        # Si ya existe una entrada para hoy, no la duplicamos
+        if not historical_rates_data or historical_rates_data[0]["date"] != today_date_str_for_history_check:
             historical_rates_data.insert(0, {
-                "date": today_date_str,
+                "date": today_date_str_for_history_check,
                 "usd": usd_rate,
                 "eur": eur_rate
             })
