@@ -369,12 +369,34 @@ def get_bcv_history():
     load_rates_from_firestore() # Asegurarse de que el historial en memoria esté actualizado desde Firestore
     return jsonify(historical_rates_in_memory)
 
+# Función para realizar el self-ping
+def self_ping():
+    """
+    Realiza un ping a la propia aplicación para mantenerla activa en servicios como Render Free Tier.
+    Esto evita que la aplicación se "duerma" por inactividad.
+    """
+    app_external_hostname = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+    if app_external_hostname:
+        ping_url = f"https://{app_external_hostname}/api/bcv-rates" # Usar la variable de entorno para la URL
+        try:
+            # Usar un método HEAD para el ping para reducir el consumo de recursos
+            response = requests.head(ping_url, timeout=5)
+            if response.status_code == 200:
+                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping exitoso a {ping_url}. Estado: {response.status_code}")
+            else:
+                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping fallido a {ping_url}. Estado: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error en self-ping a {ping_url}: {e}")
+    else:
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: La variable de entorno 'RENDER_EXTERNAL_HOSTNAME' no está configurada. No se puede realizar el self-ping.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Esto podría significar que tu app se duerma en Render Free Tier.")
+
+
 # Configuración del scheduler para tareas en segundo plano
 scheduler = BackgroundScheduler(timezone="America/Caracas")
 
 if __name__ == '__main__':
     # Ejecutar el scraping al inicio para tener datos frescos tan pronto como la aplicación inicie
-    # Ya no usamos asyncio.run aquí, ya que todas las funciones de Firestore son síncronas
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando la aplicación. Ejecutando scraping inicial...")
     fetch_and_update_bcv_rates_firestore()
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping inicial completado.")
@@ -392,6 +414,12 @@ if __name__ == '__main__':
     # Programar la limpieza de datos históricos antiguos (ej. una vez al día)
     scheduler.add_job(cleanup_old_historical_rates, 'cron', hour=1, minute=0, day_of_week='mon-sun')
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.")
+
+    # Programar el self-ping para que se ejecute cada 5 minutos (300 segundos)
+    # Esto ayuda a mantener la aplicación "despierta" en el plan gratuito de Render.com
+    # (Render duerme los servicios después de 15 minutos de inactividad).
+    scheduler.add_job(self_ping, 'interval', seconds=300)
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping programado cada 5 minutos.")
 
     # Iniciar el scheduler
     scheduler.start()
