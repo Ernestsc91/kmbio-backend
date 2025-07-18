@@ -32,7 +32,9 @@ VENEZUELA_TZ = pytz.timezone("America/Caracas")
 def load_data(file_path, default_data):
     """
     Carga datos desde un archivo JSON.
-    Si el archivo no existe o está corrupto/vacío, devuelve los datos por defecto.
+    En Render.com (plan gratuito), los archivos guardados en disco NO son persistentes
+    a través de reinicios o despliegues. Por lo tanto, estos archivos se "resetearán"
+    a su estado inicial (o no existirán) cada vez que el servicio se reinicie.
     """
     if os.path.exists(file_path):
         try:
@@ -47,7 +49,10 @@ def load_data(file_path, default_data):
     return default_data
 
 def save_data(file_path, data):
-    """Guarda datos en un archivo JSON."""
+    """
+    Guarda datos en un archivo JSON.
+    En Render.com (plan gratuito), estos cambios se perderán en el próximo reinicio/despliegue.
+    """
     try:
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
@@ -62,7 +67,8 @@ current_rates = load_data(CURRENT_RATES_FILE, {
     "ut": FIXED_UT_RATE,
     "last_updated": datetime.now(VENEZUELA_TZ).strftime("%Y-%m-%d %H:%M:%S") + " (predeterminado)",
     "usd_change_percent": 0.0,
-    "eur_change_percent": 0.0
+    "eur_change_percent": 0.0,
+    "rates_effective_date": datetime.now(VENEZUELA_TZ).strftime("%Y-%m-%d") # Nueva clave
 })
 historical_rates_data = load_data(HISTORICAL_RATES_FILE, [])
 
@@ -86,35 +92,46 @@ def fetch_and_update_bcv_rates():
     """
     Intenta obtener las tasas de USD y EUR del BCV mediante web scraping,
     las actualiza, calcula el cambio porcentual y guarda los datos.
+    
+    Esta función ahora solo realiza el scraping si la fecha efectiva actual
+    no es la fecha de hoy, asegurando que las tasas se fijen una vez al día.
     """
     global current_rates, historical_rates_data
     
     now_venezuela = datetime.now(VENEZUELA_TZ)
     today_date_str_ymd = now_venezuela.strftime("%Y-%m-%d")
 
-    # --- INICIO DE SECCIÓN DE DEPURACIÓN (DESHABILITADA TEMPORALMENTE) ---
-    # COMENTAR ESTA SECCIÓN PARA FORZAR EL SCRAPING DURANTE LA DEPURACIÓN
-    # if "last_updated" in current_rates:
-    #     stored_last_updated_dt_str = current_rates["last_updated"].split(" (")[0]
-    #     stored_date_str_ymd = stored_last_updated_dt_str.split(" ")[0]
+    # --- Lógica para asegurar scraping una vez al día ---
+    # Si la fecha efectiva de las tasas actuales ya es la de hoy, no volvemos a raspar.
+    # Esto asegura que la tasa del día se mantenga fija una vez establecida.
+    if current_rates.get("rates_effective_date") == today_date_str_ymd:
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas. No se realizará scraping nuevamente hasta mañana.")
+        return
+    # --- Fin de lógica de una vez al día ---
 
-    #     if stored_date_str_ymd == today_date_str_ymd and \
-    #        (now_venezuela.hour > 0 or (now_venezuela.hour == 0 and now_venezuela.minute > 1)):
-    #         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas del BCV para hoy ({today_date_str_ymd}) ya están cargadas. No se realizará scraping hasta mañana.")
-    #         return
-    # --- FIN DE SECCIÓN DE DEPURACIÓN ---
-
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV (FORZADO para depuración)...")
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV (Scraping forzado por nueva fecha o reinicio)...")
 
     previous_usd_rate_for_calc = current_rates.get("usd", DEFAULT_USD_RATE)
     previous_eur_rate_for_calc = current_rates.get("eur", DEFAULT_EUR_RATE)
 
-    if len(historical_rates_data) >= 2:
-        previous_usd_rate_for_calc = historical_rates_data[1]["usd"]
-        previous_eur_rate_for_calc = historical_rates_data[1]["eur"]
-    elif len(historical_rates_data) == 1:
-        previous_usd_rate_for_calc = historical_rates_data[0]["usd"]
-        previous_eur_rate_for_calc = historical_rates_data[0]["eur"]
+    # Asegurarse de que previous_usd_rate_for_calc y previous_eur_rate_for_calc
+    # sean de la entrada más reciente del historial que NO sea la de hoy (si ya existe una de hoy).
+    # Esto es para calcular el cambio porcentual con respecto al día hábil anterior real.
+    found_previous_day_rate_usd = None
+    found_previous_day_rate_eur = None
+    today_date_str_for_history_check = now_venezuela.strftime("%d de %B de %Y")
+
+    for entry in historical_rates_data:
+        if entry.get("date") != today_date_str_for_history_check:
+            found_previous_day_rate_usd = entry.get("usd")
+            found_previous_day_rate_eur = entry.get("eur")
+            break # Encontramos la primera entrada que no es de hoy, esa es la del día hábil anterior.
+
+    if found_previous_day_rate_usd is not None:
+        previous_usd_rate_for_calc = found_previous_day_rate_usd
+    if found_previous_day_rate_eur is not None:
+        previous_eur_rate_for_calc = found_previous_day_rate_eur
+
 
     try:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Realizando solicitud GET a {BCV_URL}...")
@@ -128,6 +145,7 @@ def fetch_and_update_bcv_rates():
         usd_rate = None
         eur_rate = None
 
+        # Scraping para USD
         usd_container = soup.find('div', id='dolar')
         if usd_container:
             centrado_div_usd = usd_container.find('div', class_='centrado')
@@ -139,6 +157,7 @@ def fetch_and_update_bcv_rates():
                         usd_rate = float(match.group(0).replace(',', '.').strip())
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD encontrado: {usd_rate}")
 
+        # Scraping para EUR
         eur_container = soup.find('div', id='euro')
         if eur_container:
             centrado_div_eur = eur_container.find('div', class_='centrado')
@@ -161,19 +180,26 @@ def fetch_and_update_bcv_rates():
         if previous_eur_rate_for_calc != 0:
             eur_change_percent = ((eur_rate - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
 
+        # La fecha de efectividad de las tasas siempre será la fecha de hoy,
+        # ya que el scraping solo se ejecuta una vez al día para fijar la tasa del día.
+        effective_date = now_venezuela.date()
+        
         current_rates = {
             "usd": usd_rate,
             "eur": eur_rate,
             "ut": FIXED_UT_RATE,
             "last_updated": now_venezuela.strftime("%Y-%m-%d %H:%M:%S"),
-            "usd_change_percent": usd_change_percent,
-            "eur_change_percent": eur_change_percent
+            "usd_change_percent": round(usd_change_percent, 2), # Redondear a 2 decimales
+            "eur_change_percent": round(eur_change_percent, 2),  # Redondear a 2 decimales
+            "rates_effective_date": effective_date.strftime("%Y-%m-%d") # Guardar la fecha de efectividad como la de hoy
         }
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas calculadas: {current_rates}")
         save_data(CURRENT_RATES_FILE, current_rates)
 
         today_date_str_for_history = now_venezuela.strftime("%d de %B de %Y")
         
+        # Lógica para el historial: añade una nueva entrada si es un nuevo día, o actualiza la existente
+        # El historial siempre registra la fecha del día en que se realizó el scraping.
         if not historical_rates_data or \
            datetime.strptime(historical_rates_data[0]["date"], "%d de %B de %Y").date() != now_venezuela.date():
             print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Añadiendo nueva entrada al historial.")
@@ -182,7 +208,7 @@ def fetch_and_update_bcv_rates():
                 "usd": usd_rate,
                 "eur": eur_rate
             })
-            historical_rates_data = historical_rates_data[:15]
+            historical_rates_data = historical_rates_data[:15] # Mantener solo los últimos 15 días
         else:
             print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Actualizando la entrada más reciente del historial.")
             historical_rates_data[0]["usd"] = usd_rate
@@ -193,47 +219,58 @@ def fetch_and_update_bcv_rates():
 
     except requests.exceptions.Timeout:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas guardadas/predeterminadas.")
-        if len(historical_rates_data) >= 2:
-            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if previous_usd_rate_for_calc != 0 else 0.0
-            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if previous_eur_rate_for_calc != 0 else 0.0
+        # Recalcular porcentajes con los valores actuales y los del día anterior si hay un error
+        if previous_usd_rate_for_calc != 0:
+            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates["usd"] is not None else 0.0
         else:
             current_rates["usd_change_percent"] = 0.0
+        if previous_eur_rate_for_calc != 0:
+            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates["eur"] is not None else 0.0
+        else:
             current_rates["eur_change_percent"] = 0.0
         save_data(CURRENT_RATES_FILE, current_rates)
     except requests.exceptions.RequestException as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de red o HTTP al conectar con el BCV: {e}. Usando tasas guardadas/predeterminadas.")
-        if len(historical_rates_data) >= 2:
-            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if previous_usd_rate_for_calc != 0 else 0.0
-            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if previous_eur_rate_for_calc != 0 else 0.0
+        if previous_usd_rate_for_calc != 0:
+            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates["usd"] is not None else 0.0
         else:
             current_rates["usd_change_percent"] = 0.0
+        if previous_eur_rate_for_calc != 0:
+            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates["eur"] is not None else 0.0
+        else:
             current_rates["eur_change_percent"] = 0.0
         save_data(CURRENT_RATES_FILE, current_rates)
     except AttributeError:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas guardadas/predeterminadas.")
-        if len(historical_rates_data) >= 2:
-            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if previous_usd_rate_for_calc != 0 else 0.0
-            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if previous_eur_rate_for_calc != 0 else 0.0
+        if previous_usd_rate_for_calc != 0:
+            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates["usd"] is not None else 0.0
         else:
             current_rates["usd_change_percent"] = 0.0
+        if previous_eur_rate_for_calc != 0:
+            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates["eur"] is not None else 0.0
+        else:
             current_rates["eur_change_percent"] = 0.0
         save_data(CURRENT_RATES_FILE, current_rates)
     except ValueError as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos: {e}. Usando tasas guardadas/predeterminadas.")
-        if len(historical_rates_data) >= 2:
-            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if previous_usd_rate_for_calc != 0 else 0.0
-            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if previous_eur_rate_for_calc != 0 else 0.0
+        if previous_usd_rate_for_calc != 0:
+            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates["usd"] is not None else 0.0
         else:
             current_rates["usd_change_percent"] = 0.0
+        if previous_eur_rate_for_calc != 0:
+            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates["eur"] is not None else 0.0
+        else:
             current_rates["eur_change_percent"] = 0.0
         save_data(CURRENT_RATES_FILE, current_rates)
     except Exception as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Ocurrió un error inesperado durante el scraping: {e}. Usando tasas guardadas/predeterminadas.")
-        if len(historical_rates_data) >= 2:
-            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if previous_usd_rate_for_calc != 0 else 0.0
-            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if previous_eur_rate_for_calc != 0 else 0.0
+        if previous_usd_rate_for_calc != 0:
+            current_rates["usd_change_percent"] = ((current_rates["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates["usd"] is not None else 0.0
         else:
             current_rates["usd_change_percent"] = 0.0
+        if previous_eur_rate_for_calc != 0:
+            current_rates["eur_change_percent"] = ((current_rates["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates["eur"] is not None else 0.0
+        else:
             current_rates["eur_change_percent"] = 0.0
         save_data(CURRENT_RATES_FILE, current_rates)
 
