@@ -357,7 +357,7 @@ async def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         await save_current_rates_to_firestore(current_rates_in_memory)
 
-@app.route('/api/bcv-rates', methods=['GET'])
+@app.route('/api/bcv-rates', methods=['GET', 'HEAD']) # Se añadió 'HEAD' aquí
 async def get_current_bcv_rates():
     """Endpoint para obtener las tasas actuales del BCV desde Firestore."""
     await load_rates_from_firestore() # Asegurarse de que las tasas en memoria estén actualizadas desde Firestore
