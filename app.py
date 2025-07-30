@@ -169,6 +169,28 @@ def cleanup_old_historical_rates():
     except Exception as e:
         print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al limpiar historial en Firestore: {e}")
 
+# Función para realizar el self-ping
+def self_ping():
+    """
+    Realiza un ping a la propia aplicación para mantenerla activa en servicios como Render Free Tier.
+    Esto evita que la aplicación se "duerma" por inactividad.
+    """
+    app_external_hostname = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
+    if app_external_hostname:
+        ping_url = f"https://{app_external_hostname}/api/bcv-rates" # Usar la variable de entorno para la URL
+        try:
+            # Usar un método HEAD para el ping para reducir el consumo de recursos
+            response = requests.head(ping_url, timeout=5)
+            if response.status_code == 200:
+                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping exitoso a {ping_url}. Estado: {response.status_code}")
+            else:
+                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping fallido a {ping_url}. Estado: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error en self-ping a {ping_url}: {e}")
+    else:
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: La variable de entorno 'RENDER_EXTERNAL_HOSTNAME' no está configurada. No se puede realizar el self-ping.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Esto podría significar que tu app se duerma en Render Free Tier.")
+
 
 def fetch_and_update_bcv_rates_firestore():
     """
@@ -438,29 +460,6 @@ def get_bcv_history():
     """Endpoint para obtener el historial de tasas del BCV desde Firestore."""
     load_rates_from_firestore() # Asegurarse de que el historial en memoria esté actualizado desde Firestore
     return jsonify(historical_rates_in_memory)
-
-# Función para realizar el self-ping
-def self_ping():
-    """
-    Realiza un ping a la propia aplicación para mantenerla activa en servicios como Render Free Tier.
-    Esto evita que la aplicación se "duerma" por inactividad.
-    """
-    app_external_hostname = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
-    if app_external_hostname:
-        ping_url = f"https://{app_external_hostname}/api/bcv-rates" # Usar la variable de entorno para la URL
-        try:
-            # Usar un método HEAD para el ping para reducir el consumo de recursos
-            response = requests.head(ping_url, timeout=5)
-            if response.status_code == 200:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping exitoso a {ping_url}. Estado: {response.status_code}")
-            else:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping fallido a {ping_url}. Estado: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error en self-ping a {ping_url}: {e}")
-    else:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: La variable de entorno 'RENDER_EXTERNAL_HOSTNAME' no está configurada. No se puede realizar el self-ping.")
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Esto podría significar que tu app se duerma en Render Free Tier.")
-
 
 if __name__ == '__main__':
     # Obtener el puerto de las variables de entorno (para entornos de despliegue como Render.com)
