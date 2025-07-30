@@ -23,8 +23,8 @@ warnings.filterwarnings("ignore")
 app = Flask(__name__)
 CORS(app)
 
-DEFAULT_USD_RATE = 00.01
-DEFAULT_EUR_RATE = 00.01
+DEFAULT_USD_RATE = 0.01
+DEFAULT_EUR_RATE = 0.01
 FIXED_UT_RATE = 43.00
 
 BCV_URL = "https://www.bcv.org.ve/"
@@ -74,7 +74,7 @@ def load_rates_from_firestore():
         current_rates_doc_ref = db.collection('current_rates').document('latest_rates')
         current_rates_doc = current_rates_doc_ref.get()
         if current_rates_doc.exists:
-            current_rates_in_memory = current_rates_doc.to_dict()
+            current_rates_in_memory.update(current_rates_doc.to_dict())
             print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales cargadas de Firestore: {current_rates_in_memory}")
         else:
             print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Documento 'latest_rates' no encontrado en Firestore. Usando valores predeterminados.")
@@ -82,6 +82,8 @@ def load_rates_from_firestore():
             save_current_rates_to_firestore(current_rates_in_memory)
 
         # Cargar historial (últimos 15 días de la colección 'historical_rates')
+        # NOTA: Firestore no permite ordenar por un campo que no está indexado y luego filtrar por otro.
+        # La forma más segura es ordenar por 'date_ymd' y luego limitar.
         historical_docs = db.collection('historical_rates') \
                             .order_by('date_ymd', direction=firestore.Query.DESCENDING) \
                             .limit(15) \
@@ -303,56 +305,56 @@ def fetch_and_update_bcv_rates_firestore():
     except requests.exceptions.Timeout:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
         # Recalcular porcentajes con los valores actuales en memoria y los del día anterior si hay un error
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory) # Guardar en Firestore para persistencia
     except requests.exceptions.RequestException as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de red o HTTP al conectar con el BCV: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except AttributeError:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except ValueError as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except Exception as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Ocurrió un error inesperado durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
@@ -430,3 +432,4 @@ if __name__ == '__main__':
     # Iniciar la aplicación Flask
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando servidor Flask en el puerto {port}...")
     app.run(host='0.0.0.0', port=port, debug=False)
+
