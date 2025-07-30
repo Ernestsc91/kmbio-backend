@@ -76,7 +76,11 @@ def load_rates_from_firestore():
         current_rates_doc_ref = db.collection('current_rates').document('latest_rates')
         current_rates_doc = current_rates_doc_ref.get()
         if current_rates_doc.exists:
-            current_rates_in_memory.update(current_rates_doc.to_dict())
+            loaded_data = current_rates_doc.to_dict()
+            # Limpiar el campo 'placeholder' si existe
+            if 'placeholder' in loaded_data:
+                del loaded_data['placeholder']
+            current_rates_in_memory.update(loaded_data)
             print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales cargadas de Firestore: {current_rates_in_memory}")
         else:
             print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Documento 'latest_rates' no encontrado en Firestore. Usando valores predeterminados.")
@@ -90,7 +94,10 @@ def load_rates_from_firestore():
                             .get()
         historical_rates_in_memory = []
         for doc in historical_docs:
-            historical_rates_in_memory.append(doc.to_dict())
+            loaded_history_entry = doc.to_dict()
+            if 'placeholder' in loaded_history_entry: # Limpiar también en el historial
+                del loaded_history_entry['placeholder']
+            historical_rates_in_memory.append(loaded_history_entry)
         
         # Asegurarse de que el historial esté ordenado por fecha de más reciente a más antiguo
         historical_rates_in_memory.sort(key=lambda x: datetime.strptime(x['date_ymd'], "%Y-%m-%d"), reverse=True)
@@ -283,8 +290,12 @@ def fetch_and_update_bcv_rates_firestore():
         # Asegurarse de que previous_usd_rate_for_calc no sea cero para evitar división por cero
         if previous_usd_rate_for_calc != 0 and usd_rate is not None:
             usd_change_percent = ((usd_rate - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
+        else:
+            current_rates_in_memory["usd_change_percent"] = 0.0 # Asegura que el porcentaje sea 0 si la tasa anterior es 0
         if previous_eur_rate_for_calc != 0 and eur_rate is not None:
             eur_change_percent = ((eur_rate - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
+        else:
+            current_rates_in_memory["eur_change_percent"] = 0.0 # Asegura que el porcentaje sea 0 si la tasa anterior es 0
 
         # Actualizar current_rates_in_memory con las nuevas tasas (extraídas o de respaldo)
         # y los porcentajes calculados.
@@ -330,6 +341,7 @@ def fetch_and_update_bcv_rates_firestore():
 
     except requests.exceptions.Timeout:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
+        # Recalcular porcentajes con los valores actuales en memoria y los del día anterior si hay un error
         if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
@@ -353,108 +365,4 @@ def fetch_and_update_bcv_rates_firestore():
     except AttributeError:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping (AttributeError): No se encontraron los elementos HTML esperados o su estructura cambió. Usando tasas cargadas de Firestore/predeterminadas.")
         if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-    except ValueError as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos (ValueError): {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-    except Exception as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Ocurrió un error inesperado durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if current_rates_in_memory["eur"] is not None and previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-
-@app.route('/api/bcv-rates', methods=['GET', 'HEAD']) # Se añadió 'HEAD' aquí
-def get_current_bcv_rates():
-    """Endpoint para obtener las tasas actuales del BCV desde Firestore."""
-    load_rates_from_firestore() # Asegurarse de que las tasas en memoria estén actualizadas desde Firestore
-    return jsonify(current_rates_in_memory)
-
-@app.route('/api/bcv-history', methods=['GET'])
-def get_bcv_history():
-    """Endpoint para obtener el historial de tasas del BCV desde Firestore."""
-    load_rates_from_firestore() # Asegurarse de que el historial en memoria esté actualizado desde Firestore
-    return jsonify(historical_rates_in_memory)
-
-# Función para realizar el self-ping
-def self_ping():
-    """
-    Realiza un ping a la propia aplicación para mantenerla activa en servicios como Render Free Tier.
-    Esto evita que la aplicación se "duerma" por inactividad.
-    """
-    app_external_hostname = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
-    if app_external_hostname:
-        ping_url = f"https://{app_external_hostname}/api/bcv-rates" # Usar la variable de entorno para la URL
-        try:
-            # Usar un método HEAD para el ping para reducir el consumo de recursos
-            response = requests.head(ping_url, timeout=5)
-            if response.status_code == 200:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping exitoso a {ping_url}. Estado: {response.status_code}")
-            else:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping fallido a {ping_url}. Estado: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error en self-ping a {ping_url}: {e}")
-    else:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: La variable de entorno 'RENDER_EXTERNAL_HOSTNAME' no está configurada. No se puede realizar el self-ping.")
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Esto podría significar que tu app se duerma en Render Free Tier.")
-
-
-# Configuración del scheduler para tareas en segundo plano
-scheduler = BackgroundScheduler(timezone="America/Caracas")
-
-if __name__ == '__main__':
-    # Ejecutar el scraping al inicio para tener datos frescos tan pronto como la aplicación inicie
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando la aplicación. Ejecutando scraping inicial...")
-    fetch_and_update_bcv_rates_firestore()
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping inicial completado.")
-
-    # Programar el scraping para que se ejecute diariamente a la 00:01, 00:02, 00:04, 00:06, 00:08, 00:10 (medianoche)
-    # Esto asegura que las tasas se actualicen al inicio de cada día hábil.
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=1, day_of_week='mon-fri')
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=2, day_of_week='mon-fri')
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=4, day_of_week='mon-fri')
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=6, day_of_week='mon-fri')
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=8, day_of_week='mon-fri')
-    scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=10, day_of_week='mon-fri')
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping diario programado para 00:01, 00:02, 00:04, 00:06, 00:08, 00:10 (L-V).")
-    
-    # Programar la limpieza de datos históricos antiguos (ej. una vez al día)
-    scheduler.add_job(cleanup_old_historical_rates, 'cron', hour=1, minute=0, day_of_week='mon-sun')
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.")
-
-    # Programar el self-ping para que se ejecute cada 5 minutos (300 segundos)
-    # Esto ayuda a mantener la aplicación \"despierta\" en el plan gratuito de Render.com
-    # (Render duerme los servicios después de 15 minutos de inactividad).
-    scheduler.add_job(self_ping, 'interval', seconds=300)
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping programado cada 5 minutos.")
-
-    # Iniciar el scheduler
-    scheduler.start()
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scheduler iniciado.")
-
-    # Obtener el puerto de las variables de entorno (para entornos de despliegue como Render.com)
-    port = int(os.environ.get('PORT', 5000))
-    # Iniciar la aplicación Flask
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando servidor Flask en el puerto {port}...")
-    app.run(host='0.0.0.0', port=port, debug=False)
-
+            current_rates_in_memory["usd_c
