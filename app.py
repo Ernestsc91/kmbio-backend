@@ -215,11 +215,16 @@ def fetch_and_update_bcv_rates_firestore():
     # Cargar las tasas actuales desde Firestore antes de decidir si raspar
     load_rates_from_firestore()
 
-    # Si la fecha efectiva de las tasas actuales (cargadas de Firestore)
-    # ya es la de hoy, y NO es una llamada programada de la madrugada,
-    # entonces no volvemos a raspar. Esto intenta mantener la tasa fija durante el día.
-    if current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd and not is_scheduled_early_morning_call:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.")
+    # REVISIÓN DE LA LÓGICA DE SALTO DE SCRAPING:
+    # Se saltará el scraping si:
+    # 1. La fecha efectiva de las tasas en memoria ya es la de hoy.
+    # 2. Y (las tasas de USD O EUR NO son los valores predeterminados). Esto significa que ya tenemos tasas reales para hoy.
+    # 3. Y NO es una de las llamadas programadas de la madrugada (estas deben forzar siempre un intento de scraping).
+    if (current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd and
+        (current_rates_in_memory.get("usd") != DEFAULT_USD_RATE or
+         current_rates_in_memory.get("eur") != DEFAULT_EUR_RATE) and
+        not is_scheduled_early_morning_call):
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore (no son predeterminadas) y no es un horario de scraping programado. No se realizará scraping nuevamente.")
         return
 
     print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV (Scraping forzado por nueva fecha, reinicio o horario programado)...")
