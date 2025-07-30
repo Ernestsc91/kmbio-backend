@@ -23,7 +23,9 @@ warnings.filterwarnings("ignore")
 app = Flask(__name__)
 CORS(app)
 
-DEFAULT_USD_RATE = 0.01
+# NOTA: Estas tasas predeterminadas son muy bajas. Si las ves en la app,
+# es un fuerte indicio de que el scraping está fallando.
+DEFAULT_USD_RATE = 0.01 
 DEFAULT_EUR_RATE = 0.01
 FIXED_UT_RATE = 43.00
 
@@ -82,8 +84,6 @@ def load_rates_from_firestore():
             save_current_rates_to_firestore(current_rates_in_memory)
 
         # Cargar historial (últimos 15 días de la colección 'historical_rates')
-        # NOTA: Firestore no permite ordenar por un campo que no está indexado y luego filtrar por otro.
-        # La forma más segura es ordenar por 'date_ymd' y luego limitar.
         historical_docs = db.collection('historical_rates') \
                             .order_by('date_ymd', direction=firestore.Query.DESCENDING) \
                             .limit(15) \
@@ -195,7 +195,6 @@ def fetch_and_update_bcv_rates_firestore():
 
     print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV (Scraping forzado por nueva fecha, reinicio o horario programado)...")
 
-    # Obtener la tasa del día hábil anterior del historial para calcular el cambio porcentual
     previous_usd_rate_for_calc = current_rates_in_memory.get("usd", DEFAULT_USD_RATE)
     previous_eur_rate_for_calc = current_rates_in_memory.get("eur", DEFAULT_EUR_RATE)
 
@@ -225,41 +224,71 @@ def fetch_and_update_bcv_rates_firestore():
         usd_rate = None
         eur_rate = None
 
+        # --- INICIO DE DEPURACIÓN DETALLADA DEL SCRAPING ---
         usd_container = soup.find('div', id='dolar')
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD container (id='dolar') encontrado: {usd_container is not None}")
         if usd_container:
             centrado_div_usd = usd_container.find('div', class_='centrado')
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD div con clase 'centrado' encontrado: {centrado_div_usd is not None}")
             if centrado_div_usd:
                 usd_strong_tag = centrado_div_usd.find('strong')
+                print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD strong tag encontrado: {usd_strong_tag is not None}")
                 if usd_strong_tag:
                     match = re.search(r'[\d,\.]+', usd_strong_tag.text)
                     if match:
                         usd_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD encontrado: {usd_rate}")
+                        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasa USD extraída: {usd_rate}")
+                    else:
+                        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró coincidencia para la tasa USD en el texto del strong tag: '{usd_strong_tag.text}'")
+                else:
+                    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró strong tag dentro del div 'centrado' para USD.")
+            else:
+                print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró div 'centrado' dentro del contenedor 'dolar' para USD.")
+        else:
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Contenedor USD (id='dolar') no encontrado en la página.")
 
         eur_container = soup.find('div', id='euro')
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] EUR container (id='euro') encontrado: {eur_container is not None}")
         if eur_container:
             centrado_div_eur = eur_container.find('div', class_='centrado')
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] EUR div con clase 'centrado' encontrado: {centrado_div_eur is not None}")
             if centrado_div_eur:
                 eur_strong_tag = centrado_div_eur.find('strong')
+                print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] EUR strong tag encontrado: {eur_strong_tag is not None}")
                 if eur_strong_tag:
                     match = re.search(r'[\d,\.]+', eur_strong_tag.text)
                     if match:
                         eur_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] EUR encontrado: {eur_rate}")
+                        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasa EUR extraída: {eur_rate}")
+                    else:
+                        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró coincidencia para la tasa EUR en el texto del strong tag: '{eur_strong_tag.text}'")
+                else:
+                    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró strong tag dentro del div 'centrado' para EUR.")
+            else:
+                print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] No se encontró div 'centrado' dentro del contenedor 'euro' para EUR.")
+        else:
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Contenedor EUR (id='euro') no encontrado en la página.")
+        # --- FIN DE DEPURACIÓN DETALLADA DEL SCRAPING ---
 
         if usd_rate is None or eur_rate is None:
-            raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD o EUR. La estructura de la página del BCV pudo haber cambiado.")
+            # Si el scraping falla, usamos las tasas que ya teníamos cargadas (de Firestore o predeterminadas)
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: No se pudieron extraer ambas tasas (USD y/o EUR) del BCV. Usando las tasas previamente cargadas/predeterminadas para el cálculo de porcentajes y actualización.")
+            usd_rate = current_rates_in_memory.get("usd", DEFAULT_USD_RATE)
+            eur_rate = current_rates_in_memory.get("eur", DEFAULT_EUR_RATE)
+            # No se lanza ValueError aquí para permitir que la aplicación continúe funcionando con datos de respaldo.
 
         usd_change_percent = 0.0
         eur_change_percent = 0.0
 
-        if previous_usd_rate_for_calc != 0:
+        # Asegurarse de que previous_usd_rate_for_calc no sea cero para evitar división por cero
+        if previous_usd_rate_for_calc != 0 and usd_rate is not None:
             usd_change_percent = ((usd_rate - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
-        if previous_eur_rate_for_calc != 0:
+        if previous_eur_rate_for_calc != 0 and eur_rate is not None:
             eur_change_percent = ((eur_rate - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
 
-        # Actualizar las tasas en memoria
-        current_rates_in_memory = {
+        # Actualizar current_rates_in_memory con las nuevas tasas (extraídas o de respaldo)
+        # y los porcentajes calculados.
+        current_rates_in_memory.update({
             "usd": usd_rate,
             "eur": eur_rate,
             "ut": FIXED_UT_RATE,
@@ -267,44 +296,40 @@ def fetch_and_update_bcv_rates_firestore():
             "usd_change_percent": round(usd_change_percent, 2),
             "eur_change_percent": round(eur_change_percent, 2),
             "rates_effective_date": today_date_str_ymd
-        }
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas calculadas: {current_rates_in_memory}")
+        })
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas finales para actualización: {current_rates_in_memory}")
         
-        # Guardar las tasas actuales en Firestore
+        # Guardar las tasas actuales en Firestore (siempre, incluso si son de respaldo)
         save_current_rates_to_firestore(current_rates_in_memory)
 
-        # Actualizar el historial en Firestore
-        # Primero, verificar si ya existe una entrada para hoy
-        today_history_doc_ref = db.collection('historical_rates').document(today_date_str_ymd)
-        today_history_doc = today_history_doc_ref.get()
+        # Actualizar el historial en Firestore solo si el scraping fue exitoso para USD y EUR
+        if usd_rate is not None and eur_rate is not None:
+            today_history_doc_ref = db.collection('historical_rates').document(today_date_str_ymd)
+            today_history_doc = today_history_doc_ref.get()
 
-        if not today_history_doc.exists:
-            # Si no existe, añadir una nueva entrada
-            new_history_entry = {
-                "date": today_date_str_human,
-                "date_ymd": today_date_str_ymd,
-                "usd": usd_rate,
-                "eur": eur_rate
-            }
-            save_historical_rate_to_firestore(new_history_entry)
-            # Volver a cargar el historial en memoria para reflejar el cambio
-            load_rates_from_firestore() 
-        else:
-            # Si ya existe, actualizarla
-            updated_history_entry = {
-                "usd": usd_rate,
-                "eur": eur_rate
-            }
-            today_history_doc_ref.update(updated_history_entry)
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.")
+            if not today_history_doc.exists:
+                new_history_entry = {
+                    "date": today_date_str_human,
+                    "date_ymd": today_date_str_ymd,
+                    "usd": usd_rate,
+                    "eur": eur_rate
+                }
+                save_historical_rate_to_firestore(new_history_entry)
+            else:
+                updated_history_entry = {
+                    "usd": usd_rate,
+                    "eur": eur_rate
+                }
+                today_history_doc_ref.update(updated_history_entry)
+                print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.")
+            
             # Volver a cargar el historial en memoria para reflejar el cambio
             load_rates_from_firestore()
 
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas procesadas y guardadas en Firestore: USD={current_rates_in_memory['usd']:.4f} ({current_rates_in_memory['usd_change_percent']:.2f}%), EUR={current_rates_in_memory['eur']:.4f} ({current_rates_in_memory['eur_change_percent']:.2f}%)")
 
     except requests.exceptions.Timeout:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
-        # Recalcular porcentajes con los valores actuales en memoria y los del día anterior si hay un error
         if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
@@ -326,7 +351,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except AttributeError:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping (AttributeError): No se encontraron los elementos HTML esperados o su estructura cambió. Usando tasas cargadas de Firestore/predeterminadas.")
         if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
@@ -337,7 +362,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except ValueError as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos (ValueError): {e}. Usando tasas cargadas de Firestore/predeterminadas.")
         if current_rates_in_memory["usd"] is not None and previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
@@ -418,7 +443,7 @@ if __name__ == '__main__':
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.")
 
     # Programar el self-ping para que se ejecute cada 5 minutos (300 segundos)
-    # Esto ayuda a mantener la aplicación "despierta" en el plan gratuito de Render.com
+    # Esto ayuda a mantener la aplicación \"despierta\" en el plan gratuito de Render.com
     # (Render duerme los servicios después de 15 minutos de inactividad).
     scheduler.add_job(self_ping, 'interval', seconds=300)
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping programado cada 5 minutos.")
