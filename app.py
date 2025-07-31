@@ -157,10 +157,37 @@ def fetch_and_update_bcv_rates_firestore():
 
     load_rates_from_firestore()
 
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: current_rates_in_memory.rates_effective_date = {current_rates_in_memory.get('rates_effective_date')}, today_date_str_ymd = {today_date_str_ymd}, is_scheduled_early_morning_call = {is_scheduled_early_morning_call}", flush=True)
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: today_date_str_ymd = {today_date_str_ymd}", flush=True)
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: current_rates_in_memory.rates_effective_date = {current_rates_in_memory.get('rates_effective_date')}", flush=True)
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: is_scheduled_early_morning_call = {is_scheduled_early_morning_call}", flush=True)
 
-    if current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd and not is_scheduled_early_morning_call:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.", flush=True)
+    # Obtener la fecha efectiva del BCV para la validación
+    bcv_effective_date_ymd = None
+    try:
+        response_check = requests.get(BCV_URL, timeout=5, verify=False)
+        response_check.raise_for_status()
+        soup_check = BeautifulSoup(response_check.text, 'lxml')
+        date_span = soup_check.find('span', class_='date-display-single')
+        if date_span and 'content' in date_span.attrs:
+            # Extraer solo la parte de la fecha (YYYY-MM-DD)
+            bcv_effective_date_ymd = date_span['content'].split('T')[0]
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Fecha efectiva del BCV encontrada: {bcv_effective_date_ymd}", flush=True)
+        else:
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: No se pudo encontrar la fecha efectiva en la página del BCV.", flush=True)
+
+    except Exception as e:
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error al intentar obtener la fecha efectiva del BCV: {e}", flush=True)
+    
+    # La condición de scraping ahora usa la fecha efectiva del BCV si está disponible,
+    # o cae de nuevo a la fecha actual si no se pudo obtener del BCV.
+    # Esto asegura que el scraping solo ocurra una vez por día efectivo del BCV.
+    effective_date_to_check = bcv_effective_date_ymd if bcv_effective_date_ymd else today_date_str_ymd
+    
+    condition_result = (current_rates_in_memory.get("rates_effective_date") == effective_date_to_check and not is_scheduled_early_morning_call)
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Full condition result = {condition_result}", flush=True)
+
+    if condition_result:
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas del BCV para hoy ({effective_date_to_check}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.", flush=True)
         return
     else:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Condición para scraping met. Procediendo con el scraping.", flush=True)
@@ -192,7 +219,10 @@ def fetch_and_update_bcv_rates_firestore():
 
         usd_rate = None
         eur_rate = None
+        scraped_effective_date_ymd = None
+        scraped_effective_date_human = None
 
+        # Scraping del Dolar
         usd_container = soup.find('div', id='dolar')
         if usd_container:
             centrado_div_usd = usd_container.find('div', class_='centrado')
@@ -204,6 +234,7 @@ def fetch_and_update_bcv_rates_firestore():
                         usd_rate = float(match.group(0).replace(',', '.').strip())
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: USD encontrado: {usd_rate}", flush=True)
 
+        # Scraping del Euro
         eur_container = soup.find('div', id='euro')
         if eur_container:
             centrado_div_eur = eur_container.find('div', class_='centrado')
@@ -215,8 +246,16 @@ def fetch_and_update_bcv_rates_firestore():
                         eur_rate = float(match.group(0).replace(',', '.').strip())
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: EUR encontrado: {eur_rate}", flush=True)
 
-        if usd_rate is None or eur_rate is None:
-            raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD o EUR. La estructura de la página del BCV pudo haber cambiado.")
+        # Scraping de la Fecha de Valor
+        date_span = soup.find('span', class_='date-display-single')
+        if date_span and 'content' in date_span.attrs:
+            scraped_effective_date_ymd = date_span['content'].split('T')[0]
+            scraped_effective_date_human = date_span.get_text(strip=True)
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Fecha de valor scrapeada: YMD={scraped_effective_date_ymd}, Human={scraped_effective_date_human}", flush=True)
+
+
+        if usd_rate is None or eur_rate is None or scraped_effective_date_ymd is None:
+            raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD, EUR o la fecha. La estructura de la página del BCV pudo haber cambiado.")
 
         usd_change_percent = 0.0
         eur_change_percent = 0.0
@@ -233,44 +272,47 @@ def fetch_and_update_bcv_rates_firestore():
             "last_updated": now_venezuela.strftime("%Y-%m-%d %H:%M:%S"),
             "usd_change_percent": round(usd_change_percent, 2),
             "eur_change_percent": round(eur_change_percent, 2),
-            "rates_effective_date": today_date_str_ymd
+            "rates_effective_date": scraped_effective_date_ymd # Usar la fecha scrapeada
         }
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas calculadas y actualizadas en memoria: {current_rates_in_memory}", flush=True)
         
         save_current_rates_to_firestore(current_rates_in_memory)
 
-        today_history_doc_ref = db.collection('historical_rates').document(today_date_str_ymd)
+        # Actualizar el historial en Firestore con la fecha scrapeada
+        today_history_doc_ref = db.collection('historical_rates').document(scraped_effective_date_ymd)
         today_history_doc = today_history_doc_ref.get()
 
         if not today_history_doc.exists:
             new_history_entry = {
-                "date": today_date_str_human,
-                "date_ymd": today_date_str_ymd,
+                "date": scraped_effective_date_human, # Usar la fecha legible scrapeada
+                "date_ymd": scraped_effective_date_ymd,
                 "usd": usd_rate,
                 "eur": eur_rate
             }
             save_historical_rate_to_firestore(new_history_entry)
-            load_rates_from_firestore()
+            load_rates_from_firestore() 
         else:
             updated_history_entry = {
                 "usd": usd_rate,
                 "eur": eur_rate
             }
             today_history_doc_ref.update(updated_history_entry)
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.", flush=True)
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Entrada de historial existente actualizada en Firestore para {scraped_effective_date_ymd}.", flush=True)
             load_rates_from_firestore()
 
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)", flush=True)
 
     except Exception as e:
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Ocurrió un error durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.", flush=True)
-        current_rates_in_memory["rates_effective_date"] = today_date_str_ymd
+        # En caso de error, la fecha efectiva en Firestore se actualizará a la fecha actual
+        # para evitar reintentos constantes del scraping si la página está rota.
+        current_rates_in_memory["rates_effective_date"] = today_date_str_ymd 
         if previous_usd_rate_for_calc != 0 and current_rates_in_memory.get("usd") is not None:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
         if previous_eur_rate_for_calc != 0 and current_rates_in_memory.get("eur") is not None:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_rates_in_memory["eur"]) * 100
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
