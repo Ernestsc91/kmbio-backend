@@ -236,14 +236,8 @@ def fetch_and_update_bcv_rates_firestore():
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Hoy es fin de semana. No se realizará scraping.", flush=True)
         return
 
-    # is_scheduled_early_morning_call ya no es relevante para la lógica de salto aquí,
-    # porque el scraping solo se ejecutará bajo demanda.
-    # Se mantiene para la compatibilidad con el log de scraping si se llegara a usar en un cron job futuro.
-    is_scheduled_early_morning_call = False 
-
     print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: --- INICIANDO EJECUCIÓN BAJO DEMANDA ---", flush=True)
     
-    # Añadir log inicial a Firestore
     log_doc_id = add_scrape_log_entry("STARTED", "Iniciando intento de scraping bajo demanda.", rates_effective_date=today_date_str_ymd)
 
     load_rates_from_firestore() # Esto actualiza current_rates_in_memory con los datos de Firestore
@@ -311,19 +305,26 @@ def fetch_and_update_bcv_rates_firestore():
             raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD o EUR. La estructura de la página del BCV pudo haber cambiado.")
 
         # --- Lógica de Condición de Scraping Basada en Fecha de Validez ---
-        # Solo scrapeamos si la fecha efectiva en Firestore es diferente de la fecha scrapeada del BCV.
-        # Ya no hay llamadas programadas de madrugada que fuercen el scraping.
-        condition_to_skip_scraping = (current_rates_in_memory.get("rates_effective_date") == scraped_effective_date_ymd)
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Condición para SALTAR scraping (Firestore_date == Scraped_date) = {condition_to_skip_scraping}", flush=True)
-
-        if condition_to_skip_scraping:
-            message = f"Tasas del BCV para la fecha efectiva {scraped_effective_date_ymd} ya están fijadas en Firestore. Saltando scraping."
+        # SOLO actualizamos si la fecha scrapeada es LA FECHA ACTUAL DEL SISTEMA.
+        # Si el BCV publica tasas futuras, las ignoramos por ahora.
+        if scraped_effective_date_ymd != today_date_str_ymd:
+            message = f"Tasas scrapeadas del BCV ({scraped_effective_date_ymd}) no corresponden a la fecha actual del sistema ({today_date_str_ymd}). Saltando actualización de tasas."
             print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
             add_scrape_log_entry("SKIPPED", message, rates_effective_date=scraped_effective_date_ymd, doc_id=log_doc_id)
-            return # Salir de la función si la condición se cumple
-        else:
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Condición de salto NO CUMPLIDA. Procediendo con el scraping y actualización.", flush=True)
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: --- ENTRANDO EN EL BLOQUE DE ACTUALIZACIÓN DE TASAS ---", flush=True)
+            return # Salir de la función sin actualizar las tasas
+
+        # Si llegamos aquí, significa que scraped_effective_date_ymd ES today_date_str_ymd.
+        # Ahora, verificamos si las tasas en Firestore ya son para hoy.
+        # Esto previene escrituras innecesarias si la app se abre varias veces en el mismo día
+        # y el BCV no ha cambiado sus tasas *de hoy*.
+        if current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd:
+            message = f"Tasas del BCV para la fecha efectiva {today_date_str_ymd} ya están fijadas en Firestore. Saltando re-actualización."
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] {message}", flush=True)
+            add_scrape_log_entry("SKIPPED", message, rates_effective_date=today_date_str_ymd, doc_id=log_doc_id)
+            return # Salir de la función si ya tenemos las tasas de hoy
+
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Procediendo con el scraping y actualización.", flush=True)
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: --- ENTRANDO EN EL BLOQUE DE ACTUALIZACIÓN DE TASAS ---", flush=True)
 
         usd_change_percent = 0.0
         eur_change_percent = 0.0
@@ -359,14 +360,14 @@ def fetch_and_update_bcv_rates_firestore():
             "last_updated": now_venezuela.strftime("%Y-%m-%d %H:%M:%S"),
             "usd_change_percent": round(usd_change_percent, 2),
             "eur_change_percent": round(eur_change_percent, 2),
-            "rates_effective_date": scraped_effective_date_ymd if scraped_effective_date_ymd else today_date_str_ymd # Usar la fecha scrapeada o la del sistema
+            "rates_effective_date": scraped_effective_date_ymd # Usar la fecha scrapeada (que ya validamos que es la de hoy)
         }
         print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas calculadas y actualizadas en memoria: {current_rates_in_memory}", flush=True)
         
         save_current_rates_to_firestore(current_rates_in_memory)
 
         # Actualizar o añadir al historial con la fecha de validez scrapeada
-        history_date_to_use = scraped_effective_date_ymd if scraped_effective_date_ymd else today_date_str_ymd
+        history_date_to_use = scraped_effective_date_ymd
         today_history_doc_ref = db.collection('historical_rates').document(history_date_to_use)
         today_history_doc = today_history_doc_ref.get()
 
