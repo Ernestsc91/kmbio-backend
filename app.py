@@ -154,13 +154,17 @@ def fetch_and_update_bcv_rates_firestore():
         now_venezuela.hour == 0 and now_venezuela.minute in early_morning_scrape_minutes
     )
 
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Iniciando ejecución.")
+
     load_rates_from_firestore()
 
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: current_rates_in_memory.rates_effective_date = {current_rates_in_memory.get('rates_effective_date')}, today_date_str_ymd = {today_date_str_ymd}, is_scheduled_early_morning_call = {is_scheduled_early_morning_call}")
+
     if current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd and not is_scheduled_early_morning_call:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.")
         return
 
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV (Scraping forzado por nueva fecha, reinicio o horario programado)...")
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Procediendo con el scraping.")
 
     previous_usd_rate_for_calc = current_rates_in_memory.get("usd", DEFAULT_USD_RATE)
     previous_eur_rate_for_calc = current_rates_in_memory.get("eur", DEFAULT_EUR_RATE)
@@ -179,13 +183,13 @@ def fetch_and_update_bcv_rates_firestore():
         previous_eur_rate_for_calc = found_previous_day_rate_eur
 
     try:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Realizando solicitud GET a {BCV_URL}...")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Realizando solicitud GET a {BCV_URL}...")
         response = requests.get(BCV_URL, timeout=15, verify=False)
         response.raise_for_status()
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Solicitud GET exitosa. Status: {response.status_code}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Solicitud GET exitosa. Status: {response.status_code}")
 
         soup = BeautifulSoup(response.text, 'lxml')
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] BeautifulSoup parseado.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: BeautifulSoup parseado.")
 
         usd_rate = None
         eur_rate = None
@@ -199,7 +203,7 @@ def fetch_and_update_bcv_rates_firestore():
                     match = re.search(r'[\d,\.]+', usd_strong_tag.text)
                     if match:
                         usd_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] USD encontrado: {usd_rate}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: USD encontrado: {usd_rate}")
 
         eur_container = soup.find('div', id='euro')
         if eur_container:
@@ -210,7 +214,7 @@ def fetch_and_update_bcv_rates_firestore():
                     match = re.search(r'[\d,\.]+', eur_strong_tag.text)
                     if match:
                         eur_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] EUR encontrado: {eur_rate}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: EUR encontrado: {eur_rate}")
 
         if usd_rate is None or eur_rate is None:
             raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD o EUR. La estructura de la página del BCV pudo haber cambiado.")
@@ -232,7 +236,7 @@ def fetch_and_update_bcv_rates_firestore():
             "eur_change_percent": round(eur_change_percent, 2),
             "rates_effective_date": today_date_str_ymd
         }
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas calculadas: {current_rates_in_memory}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas calculadas: {current_rates_in_memory}")
         
         save_current_rates_to_firestore(current_rates_in_memory)
 
@@ -254,13 +258,13 @@ def fetch_and_update_bcv_rates_firestore():
                 "eur": eur_rate
             }
             today_history_doc_ref.update(updated_history_entry)
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.")
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.")
             load_rates_from_firestore()
 
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)")
 
     except requests.exceptions.Timeout:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
         if previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
         else:
@@ -271,7 +275,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except requests.exceptions.RequestException as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de red o HTTP al conectar con el BCV: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de red o HTTP al conectar con el BCV: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
         if previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
         else:
@@ -282,7 +286,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except AttributeError:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas cargadas de Firestore/predeterminadas.")
         if previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
         else:
@@ -293,7 +297,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except ValueError as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Error de procesamiento de datos: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de procesamiento de datos: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
         if previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
         else:
@@ -304,7 +308,7 @@ def fetch_and_update_bcv_rates_firestore():
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
     except Exception as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] Ocurrió un error inesperado durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Ocurrió un error inesperado durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
         if previous_usd_rate_for_calc != 0:
             current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
         else:
@@ -325,22 +329,6 @@ def get_bcv_history():
     load_rates_from_firestore()
     return jsonify(historical_rates_in_memory)
 
-def self_ping():
-    app_external_hostname = os.environ.get('RENDER_EXTERNAL_HOSTNAME')
-    if app_external_hostname:
-        ping_url = f"https://{app_external_hostname}/api/bcv-rates"
-        try:
-            response = requests.head(ping_url, timeout=5)
-            if response.status_code == 200:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping exitoso a {ping_url}. Estado: {response.status_code}")
-            else:
-                print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping fallido a {ping_url}. Estado: {response.status_code}")
-        except requests.exceptions.RequestException as e:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error en self-ping a {ping_url}: {e}")
-    else:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: La variable de entorno 'RENDER_EXTERNAL_HOSTNAME' no está configurada. No se puede realizar el self-ping.")
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Esto podría significar que tu app se duerma en Render Free Tier.")
-
 scheduler = BackgroundScheduler(timezone="America/Caracas")
 
 if __name__ == '__main__':
@@ -358,9 +346,6 @@ if __name__ == '__main__':
     
     scheduler.add_job(cleanup_old_historical_rates, 'cron', hour=1, minute=0, day_of_week='mon-sun')
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.")
-
-    scheduler.add_job(self_ping, 'interval', seconds=300)
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Self-ping programado cada 5 minutos.")
 
     scheduler.start()
     print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scheduler iniciado.")
