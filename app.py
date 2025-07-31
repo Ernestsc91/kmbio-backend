@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
@@ -35,12 +34,12 @@ try:
         cred = credentials.Certificate(json.loads(firebase_credentials_json))
         firebase_admin.initialize_app(cred)
         db = firestore.client()
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Firebase inicializado exitosamente.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Firebase inicializado exitosamente.", flush=True)
     else:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: FIREBASE_CREDENTIALS_JSON no está configurado. La aplicación no podrá usar Firestore.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Advertencia: FIREBASE_CREDENTIALS_JSON no está configurado. La aplicación no podrá usar Firestore.", flush=True)
         db = None
 except Exception as e:
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al inicializar Firebase: {e}")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al inicializar Firebase: {e}", flush=True)
     db = None
 
 current_rates_in_memory = {
@@ -57,18 +56,18 @@ historical_rates_in_memory = []
 def load_rates_from_firestore():
     global current_rates_in_memory, historical_rates_in_memory
     if db is None:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Firestore no está inicializado. Usando datos predeterminados en memoria.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Firestore no está inicializado. Usando datos predeterminados en memoria.", flush=True)
         return
 
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Intentando cargar tasas desde Firestore...")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Intentando cargar tasas desde Firestore...", flush=True)
     try:
         current_rates_doc_ref = db.collection('current_rates').document('latest_rates')
         current_rates_doc = current_rates_doc_ref.get()
         if current_rates_doc.exists:
             current_rates_in_memory = current_rates_doc.to_dict()
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales cargadas de Firestore: {current_rates_in_memory}")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales cargadas de Firestore: {current_rates_in_memory}", flush=True)
         else:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Documento 'latest_rates' no encontrado en Firestore. Usando valores predeterminados.")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Documento 'latest_rates' no encontrado en Firestore. Usando valores predeterminados.", flush=True)
             save_current_rates_to_firestore(current_rates_in_memory)
 
         historical_docs = db.collection('historical_rates') \
@@ -82,7 +81,7 @@ def load_rates_from_firestore():
         historical_rates_in_memory.sort(key=lambda x: datetime.strptime(x['date_ymd'], "%Y-%m-%d"), reverse=True)
 
         if not historical_rates_in_memory:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] No hay historial en Firestore. Generando datos simulados para el historial.")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] No hay historial en Firestore. Generando datos simulados para el historial.", flush=True)
             today = datetime.now(VENEZUELA_TZ)
             for i in range(15):
                 date = today - timedelta(days=i)
@@ -96,30 +95,30 @@ def load_rates_from_firestore():
                 })
             for entry in historical_rates_in_memory:
                 save_historical_rate_to_firestore(entry)
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Historial simulado guardado en Firestore.")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Historial simulado guardado en Firestore.", flush=True)
         else:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Historial cargado de Firestore: {len(historical_rates_in_memory)} entradas.")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Historial cargado de Firestore: {len(historical_rates_in_memory)} entradas.", flush=True)
 
     except Exception as e:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al cargar datos de Firestore: {e}. Usando datos en memoria/predeterminados.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al cargar datos de Firestore: {e}. Usando datos en memoria/predeterminados.", flush=True)
 
 def save_current_rates_to_firestore(data):
     if db is None: return
     try:
         doc_ref = db.collection('current_rates').document('latest_rates')
         doc_ref.set(data)
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales guardadas en Firestore.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Tasas actuales guardadas en Firestore.", flush=True)
     except Exception as e:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al guardar tasas actuales en Firestore: {e}")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al guardar tasas actuales en Firestore: {e}", flush=True)
 
 def save_historical_rate_to_firestore(data):
     if db is None: return
     try:
         doc_ref = db.collection('historical_rates').document(data['date_ymd'])
         doc_ref.set(data)
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Entrada de historial guardada/actualizada en Firestore para {data['date_ymd']}.")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Entrada de historial guardada/actualizada en Firestore para {data['date_ymd']}.", flush=True)
     except Exception as e:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al guardar historial en Firestore: {e}")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al guardar historial en Firestore: {e}", flush=True)
 
 def cleanup_old_historical_rates():
     if db is None: return
@@ -137,9 +136,9 @@ def cleanup_old_historical_rates():
             deleted_count += 1
         
         if deleted_count > 0:
-            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial: {deleted_count} documentos antiguos eliminados de Firestore.")
+            print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial: {deleted_count} documentos antiguos eliminados de Firestore.", flush=True)
     except Exception as e:
-        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al limpiar historial en Firestore: {e}")
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error al limpiar historial en Firestore: {e}", flush=True)
 
 
 def fetch_and_update_bcv_rates_firestore():
@@ -154,17 +153,17 @@ def fetch_and_update_bcv_rates_firestore():
         now_venezuela.hour == 0 and now_venezuela.minute in early_morning_scrape_minutes
     )
 
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Iniciando ejecución.")
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Iniciando ejecución.", flush=True)
 
     load_rates_from_firestore()
 
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: current_rates_in_memory.rates_effective_date = {current_rates_in_memory.get('rates_effective_date')}, today_date_str_ymd = {today_date_str_ymd}, is_scheduled_early_morning_call = {is_scheduled_early_morning_call}")
+    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: current_rates_in_memory.rates_effective_date = {current_rates_in_memory.get('rates_effective_date')}, today_date_str_ymd = {today_date_str_ymd}, is_scheduled_early_morning_call = {is_scheduled_early_morning_call}", flush=True)
 
     if current_rates_in_memory.get("rates_effective_date") == today_date_str_ymd and not is_scheduled_early_morning_call:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas del BCV para hoy ({today_date_str_ymd}) ya están fijadas en Firestore y no es un horario de scraping programado. No se realizará scraping nuevamente.", flush=True)
         return
-
-    print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Procediendo con el scraping.")
+    else:
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Condición para scraping met. Procediendo con el scraping.", flush=True)
 
     previous_usd_rate_for_calc = current_rates_in_memory.get("usd", DEFAULT_USD_RATE)
     previous_eur_rate_for_calc = current_rates_in_memory.get("eur", DEFAULT_EUR_RATE)
@@ -183,13 +182,13 @@ def fetch_and_update_bcv_rates_firestore():
         previous_eur_rate_for_calc = found_previous_day_rate_eur
 
     try:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Realizando solicitud GET a {BCV_URL}...")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Realizando solicitud GET a {BCV_URL}...", flush=True)
         response = requests.get(BCV_URL, timeout=15, verify=False)
         response.raise_for_status()
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Solicitud GET exitosa. Status: {response.status_code}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Solicitud GET exitosa. Status: {response.status_code}", flush=True)
 
         soup = BeautifulSoup(response.text, 'lxml')
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: BeautifulSoup parseado.")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: BeautifulSoup parseado.", flush=True)
 
         usd_rate = None
         eur_rate = None
@@ -203,7 +202,7 @@ def fetch_and_update_bcv_rates_firestore():
                     match = re.search(r'[\d,\.]+', usd_strong_tag.text)
                     if match:
                         usd_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: USD encontrado: {usd_rate}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: USD encontrado: {usd_rate}", flush=True)
 
         eur_container = soup.find('div', id='euro')
         if eur_container:
@@ -214,7 +213,7 @@ def fetch_and_update_bcv_rates_firestore():
                     match = re.search(r'[\d,\.]+', eur_strong_tag.text)
                     if match:
                         eur_rate = float(match.group(0).replace(',', '.').strip())
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: EUR encontrado: {eur_rate}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: EUR encontrado: {eur_rate}", flush=True)
 
         if usd_rate is None or eur_rate is None:
             raise ValueError("No se pudieron encontrar los elementos HTML esperados para USD o EUR. La estructura de la página del BCV pudo haber cambiado.")
@@ -236,7 +235,7 @@ def fetch_and_update_bcv_rates_firestore():
             "eur_change_percent": round(eur_change_percent, 2),
             "rates_effective_date": today_date_str_ymd
         }
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas calculadas: {current_rates_in_memory}")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas calculadas y actualizadas en memoria: {current_rates_in_memory}", flush=True)
         
         save_current_rates_to_firestore(current_rates_in_memory)
 
@@ -251,73 +250,32 @@ def fetch_and_update_bcv_rates_firestore():
                 "eur": eur_rate
             }
             save_historical_rate_to_firestore(new_history_entry)
-            load_rates_from_firestore() 
+            load_rates_from_firestore()
         else:
             updated_history_entry = {
                 "usd": usd_rate,
                 "eur": eur_rate
             }
             today_history_doc_ref.update(updated_history_entry)
-            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.")
+            print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Entrada de historial existente actualizada en Firestore para {today_date_str_ymd}.", flush=True)
             load_rates_from_firestore()
 
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)")
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Tasas actualizadas y guardadas en Firestore: USD={usd_rate:.4f} ({usd_change_percent:.2f}%), EUR={eur_rate:.4f} ({eur_change_percent:.2f}%)", flush=True)
 
-    except requests.exceptions.Timeout:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-    except requests.exceptions.RequestException as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de red o HTTP al conectar con el BCV: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-    except AttributeError:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de scraping: No se encontraron los elementos HTML esperados. La estructura de la página del BCV pudo haber cambiado. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
-    except ValueError as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Error de procesamiento de datos: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
-        else:
-            current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
-        else:
-            current_rates_in_memory["eur_change_percent"] = 0.0
-        save_current_rates_to_firestore(current_rates_in_memory)
     except Exception as e:
-        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Ocurrió un error inesperado durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.")
-        if previous_usd_rate_for_calc != 0:
-            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100 if current_rates_in_memory["usd"] is not None else 0.0
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Ocurrió un error durante el scraping: {e}. Usando tasas cargadas de Firestore/predeterminadas.", flush=True)
+        current_rates_in_memory["rates_effective_date"] = today_date_str_ymd
+        if previous_usd_rate_for_calc != 0 and current_rates_in_memory.get("usd") is not None:
+            current_rates_in_memory["usd_change_percent"] = ((current_rates_in_memory["usd"] - previous_usd_rate_for_calc) / previous_usd_rate_for_calc) * 100
         else:
             current_rates_in_memory["usd_change_percent"] = 0.0
-        if previous_eur_rate_for_calc != 0:
-            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_eur_rate_for_calc) * 100 if current_rates_in_memory["eur"] is not None else 0.0
+        if previous_eur_rate_for_calc != 0 and current_rates_in_memory.get("eur") is not None:
+            current_rates_in_memory["eur_change_percent"] = ((current_rates_in_memory["eur"] - previous_eur_rate_for_calc) / previous_rates_in_memory["eur"]) * 100
         else:
             current_rates_in_memory["eur_change_percent"] = 0.0
         save_current_rates_to_firestore(current_rates_in_memory)
+    finally:
+        print(f"[{now_venezuela.strftime('%Y-%m-%d %H:%M:%S')}] fetch_and_update_bcv_rates_firestore: Finalizando ejecución.", flush=True)
 
 @app.route('/api/bcv-rates', methods=['GET', 'HEAD'])
 def get_current_bcv_rates():
@@ -332,9 +290,12 @@ def get_bcv_history():
 scheduler = BackgroundScheduler(timezone="America/Caracas")
 
 if __name__ == '__main__':
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando la aplicación. Ejecutando scraping inicial...")
-    fetch_and_update_bcv_rates_firestore()
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping inicial completado.")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando la aplicación. Ejecutando scraping inicial...", flush=True)
+    try:
+        fetch_and_update_bcv_rates_firestore()
+    except Exception as e:
+        print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Error durante el scraping inicial: {e}", flush=True)
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping inicial completado.", flush=True)
 
     scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=1, day_of_week='mon-fri')
     scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=2, day_of_week='mon-fri')
@@ -342,14 +303,14 @@ if __name__ == '__main__':
     scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=6, day_of_week='mon-fri')
     scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=8, day_of_week='mon-fri')
     scheduler.add_job(fetch_and_update_bcv_rates_firestore, 'cron', hour=0, minute=10, day_of_week='mon-fri')
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping diario programado para 00:01, 00:02, 00:04, 00:06, 00:08, 00:10 (L-V).")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scraping diario programado para 00:01, 00:02, 00:04, 00:06, 00:08, 00:10 (L-V).", flush=True)
     
     scheduler.add_job(cleanup_old_historical_rates, 'cron', hour=1, minute=0, day_of_week='mon-sun')
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Limpieza de historial programada diariamente a la 01:00 AM.", flush=True)
 
     scheduler.start()
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scheduler iniciado.")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Scheduler iniciado.", flush=True)
 
     port = int(os.environ.get('PORT', 5000))
-    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando servidor Flask en el puerto {port}...")
+    print(f"[{datetime.now(VENEZUELA_TZ).strftime('%Y-%m-%d %H:%M:%S')}] Iniciando servidor Flask en el puerto {port}...", flush=True)
     app.run(host='0.0.0.0', port=port, debug=False)
