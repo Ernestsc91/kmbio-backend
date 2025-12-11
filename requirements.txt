@@ -29,6 +29,7 @@ gunicorn==23.0.0
 h11==0.16.0
 h2==4.2.0
 hpack==4.1.0
+html5lib
 httpcore==1.0.9
 httpx==0.28.1
 hyperframe==6.1.0
