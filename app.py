@@ -107,7 +107,7 @@ def fetch_bcv_rates():
     """Scrape USD y EUR del BCV."""
     rates = {}
     try:
-        response = requests.get(BCV_URL, timeout=10)
+        response = requests.get(BCV_URL, timeout=10, verify=False)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
