@@ -16,14 +16,20 @@ CORS(app)
 
 current_rates_in_memory = {}
 historical_rates_in_memory = []
+
+db = None
+
 try:
-    if not firebase_admin._apps:
-        cred = credentials.Certificate('firebase-key.json') 
+    firebase_credentials_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
+    if firebase_credentials_json and not firebase_admin._apps:
+        cred = credentials.Certificate(json.loads(firebase_credentials_json)) 
         firebase_admin.initialize_app(cred)
-    db = firestore.client()
-    print("Firebase inicializado correctamente.")
+        db = firestore.client()
+        print("Firebase inicializado correctamente.")
+    elif not firebase_credentials_json:
+         print("ADVERTENCIA: No se encontró la variable de entorno 'FIREBASE_CREDENTIALS_JSON'. Firebase no inicializado.")
 except Exception as e:
-    print(f"Error al inicializar Firebase: {e}")
+    print(f"ERROR: Fallo al inicializar Firebase: {e}")
 
 DEFAULT_USD_RATE = 00.01
 DEFAULT_EUR_RATE = 00.01
@@ -92,7 +98,8 @@ def fetch_and_update_bcv_rates():
             "usd_change_percent": round(usd_change_percent, 2),
             "eur_change_percent": round(eur_change_percent, 2)
         }
-        db.collection('rates').document('current').set(current_rates_in_memory)
+        if db:
+            db.collection('rates').document('current').set(current_rates_in_memory)
 
         if not historical_rates_in_memory or historical_rates_in_memory[0]["date"] != today_date_str_for_history_check:
             # 1. Actualizar la variable en memoria
@@ -102,6 +109,7 @@ def fetch_and_update_bcv_rates():
                 "eur": eur_rate
             })
             historical_rates_in_memory = historical_rates_in_memory[:30]
+        if db:
             db.collection('rates').document('history').set({'data': historical_rates_in_memory}) 
         
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tasas actualizadas y guardadas en FIRESTORE: USD={usd_rate}, EUR={eur_rate}")
