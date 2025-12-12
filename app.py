@@ -66,31 +66,61 @@ def load_rates_from_firestore():
 def fetch_binance_usdt():
     """Calcula promedio de USDT/VES (15 Buy + 15 Sell) de Binance P2P"""
     url = "https://p2p.binance.com/bapi/c2c/v2/public/c2c/adv/search"
-    headers = {"Content-Type": "application/json"}
+    
+    # --- CORRECCIÓN 1: HEADERS COMPLETOS ---
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+        "Origin": "https://p2p.binance.com",
+        "Referer": "https://p2p.binance.com/en/trade/all/USDT",
+        "Cache-Control": "no-cache"
+    }
+    
     prices = []
     
     try:
-        # Consultar Compra y Venta
         for trade_type in ["BUY", "SELL"]:
+            # --- CORRECCIÓN 2: PAYLOAD ROBUSTO ---
             payload = {
-                "asset": "USDT", "fiat": "VES", "merchantCheck": False,
-                "page": 1, "rows": 15, "tradeType": trade_type, "publisherType": None
+                "asset": "USDT",
+                "fiat": "VES",
+                "merchantCheck": False,
+                "page": 1,
+                "rows": 15,
+                "tradeType": trade_type,
+                "publisherType": None,
+                "payTypes": [],      # Importante agregarlo
+                "countries": []      # Importante agregarlo
             }
-            # Timeout corto para no bloquear
-            resp = requests.post(url, headers=headers, json=payload, timeout=10)
-            data = resp.json()
             
-            if data and "data" in data:
-                for ad in data["data"]:
-                    prices.append(float(ad["adv"]["price"]))
+            # Timeout aumentado ligeramente a 15s por si hay latencia en la API
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            
+            # Verificamos si la respuesta es exitosa
+            if resp.status_code == 200:
+                data = resp.json()
+                
+                # Binance devuelve 'code': '000000' si es exitoso
+                if data and "data" in data and isinstance(data["data"], list):
+                    for ad in data["data"]:
+                        # Validamos que exista la estructura 'adv' y 'price'
+                        if "adv" in ad and "price" in ad["adv"]:
+                            prices.append(float(ad["adv"]["price"]))
+                else:
+                    logger.warning(f"Binance devolvió estructura inesperada para {trade_type}: {data.get('message', 'Sin mensaje')}")
+            else:
+                logger.error(f"Error HTTP Binance {resp.status_code}: {resp.text}")
         
         if prices:
             avg_price = sum(prices) / len(prices)
             logger.info(f"Binance USDT Promedio ({len(prices)} órdenes): {avg_price}")
             return avg_price
+        
+        logger.warning("No se encontraron precios en Binance.")
         return None
+
     except Exception as e:
-        logger.error(f"Error Binance: {e}")
+        logger.error(f"Excepción en Binance: {e}")
         return None
 
 # --- LÓGICA DE ACTUALIZACIÓN ---
