@@ -18,6 +18,9 @@ FIXED_UT_RATE = 43.00
 
 BCV_URL = "https://www.bcv.org.ve/"
 
+CURRENT_RATES_FILE = 'current_rates.json'
+HISTORICAL_RATES_FILE = 'historical_rates.json'
+
 def load_data(file_path, default_data):
     if os.path.exists(file_path):
         try:
