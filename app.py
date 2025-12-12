@@ -37,6 +37,25 @@ FIXED_UT_RATE = 43.00
 
 BCV_URL = "https://www.bcv.org.ve/"
 
+def load_rates_from_firestore():
+    global current_rates_in_memory, historical_rates_in_memory
+    if db:
+        try:
+            current_doc = db.collection('rates').document('current').get()
+            if current_doc.exists:
+                current_rates_in_memory = current_doc.to_dict()
+                print("Tasas actuales cargadas de Firestore.")
+
+            history_doc = db.collection('rates').document('history').get()
+            if history_doc.exists and 'data' in history_doc.to_dict():
+                historical_rates_in_memory = history_doc.to_dict()['data']
+                print("Historial cargado de Firestore.")
+            
+        except Exception as e:
+            print(f"Error al cargar datos de Firestore: {e}")
+    else:
+        print("ADVERTENCIA: No se puede cargar de Firestore, DB no inicializada.")
+
 def fetch_and_update_bcv_rates():
     global current_rates_in_memory, historical_rates_in_memory
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV...")
@@ -79,7 +98,7 @@ def fetch_and_update_bcv_rates():
         previous_day_rate_eur = None
         
         today_date_str_for_history_check = datetime.now().strftime("%d de %B de %Y")
-        for entry in historical_rates_data:
+        for entry in historical_rates_in_memory:
             if entry.get("date") != today_date_str_for_history_check:
                 previous_day_rate_usd = entry.get("usd")
                 previous_day_rate_eur = entry.get("eur")
@@ -138,9 +157,10 @@ def get_bcv_history():
 scheduler = BackgroundScheduler(timezone="America/Caracas")
 
 if __name__ == '__main__':
+    load_rates_from_firestore()
     fetch_and_update_bcv_rates()
 
-    scheduler.add_job(fetch_and_update_bcv_rates, 'cron', hour=0, minute=1, day_of_week='mon-fri')
+    scheduler.add_job(fetch_and_update_bcv_rates, 'cron', hour=0, minute=1, day_of_week='mon-sun')
     scheduler.start()
 
     port = int(os.environ.get('PORT', 5000))
