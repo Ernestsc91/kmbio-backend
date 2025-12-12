@@ -8,9 +8,22 @@ import os
 import re
 import json
 from apscheduler.schedulers.background import BackgroundScheduler
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 app = Flask(__name__)
 CORS(app)
+
+current_rates_in_memory = {}
+historical_rates_in_memory = []
+try:
+    if not firebase_admin._apps:
+        cred = credentials.Certificate('firebase-key.json') 
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    print("Firebase inicializado correctamente.")
+except Exception as e:
+    print(f"Error al inicializar Firebase: {e}")
 
 DEFAULT_USD_RATE = 00.01
 DEFAULT_EUR_RATE = 00.01
@@ -18,36 +31,8 @@ FIXED_UT_RATE = 43.00
 
 BCV_URL = "https://www.bcv.org.ve/"
 
-CURRENT_RATES_FILE = 'current_rates.json'
-HISTORICAL_RATES_FILE = 'historical_rates.json'
-
-def load_data(file_path, default_data):
-    if os.path.exists(file_path):
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: Archivo {file_path} corrupto o vacío. Usando datos predeterminados.")
-            return default_data
-    return default_data
-
-def save_data(file_path, data):
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-current_rates = load_data(CURRENT_RATES_FILE, {
-    "usd": DEFAULT_USD_RATE,
-    "eur": DEFAULT_EUR_RATE,
-    "ut": FIXED_UT_RATE,
-    "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " (predeterminado)",
-    "usd_change_percent": 0.0,
-    "eur_change_percent": 0.0
-})
-
-historical_rates_data = load_data(HISTORICAL_RATES_FILE, [])
-
 def fetch_and_update_bcv_rates():
-    global current_rates, historical_rates_data
+    global current_rates_in_memory, historical_rates_in_memory
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Intentando actualizar tasas del BCV...")
     try:
         response = requests.get(BCV_URL, timeout=15, verify=False)
@@ -99,7 +84,7 @@ def fetch_and_update_bcv_rates():
         if previous_day_rate_eur is not None and previous_day_rate_eur != 0:
             eur_change_percent = ((eur_rate - previous_day_rate_eur) / previous_day_rate_eur) * 100
 
-        current_rates = {
+        current_rates_in_memory = {
             "usd": usd_rate,
             "eur": eur_rate,
             "ut": FIXED_UT_RATE,
@@ -107,18 +92,19 @@ def fetch_and_update_bcv_rates():
             "usd_change_percent": round(usd_change_percent, 2),
             "eur_change_percent": round(eur_change_percent, 2)
         }
-        save_data(CURRENT_RATES_FILE, current_rates)
+        db.collection('rates').document('current').set(current_rates_in_memory)
 
-        if not historical_rates_data or historical_rates_data[0]["date"] != today_date_str_for_history_check:
-            historical_rates_data.insert(0, {
+        if not historical_rates_in_memory or historical_rates_in_memory[0]["date"] != today_date_str_for_history_check:
+            # 1. Actualizar la variable en memoria
+            historical_rates_in_memory.insert(0, {
                 "date": today_date_str_for_history_check,
                 "usd": usd_rate,
                 "eur": eur_rate
             })
-            historical_rates_data = historical_rates_data[:15]
-            save_data(HISTORICAL_RATES_FILE, historical_rates_data)
+            historical_rates_in_memory = historical_rates_in_memory[:30]
+            db.collection('rates').document('history').set({'data': historical_rates_in_memory}) 
         
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tasas actualizadas y guardadas: USD={usd_rate}, EUR={eur_rate}")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tasas actualizadas y guardadas en FIRESTORE: USD={usd_rate}, EUR={eur_rate}")
 
     except requests.exceptions.Timeout:
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Error: Tiempo de espera agotado al conectar con el BCV. Usando tasas guardadas/predeterminadas.")
