@@ -1,3 +1,4 @@
+# app.py
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
@@ -17,9 +18,6 @@ DEFAULT_EUR_RATE = 00.01
 FIXED_UT_RATE = 43.00
 
 BCV_URL = "https://www.bcv.org.ve/"
-
-CURRENT_RATES_FILE = 'current_rates.json'
-HISTORICAL_RATES_FILE = 'historical_rates.json'
 
 def load_data(file_path, default_data):
     if os.path.exists(file_path):
@@ -133,11 +131,13 @@ def fetch_and_update_bcv_rates():
 
 @app.route('/api/bcv-rates', methods=['GET'])
 def get_current_bcv_rates():
-    return jsonify(current_rates)
+    # Retorna las tasas cargadas de Firestore
+    return jsonify(current_rates_in_memory)
 
 @app.route('/api/bcv-history', methods=['GET'])
 def get_bcv_history():
-    return jsonify(historical_rates_data)
+    # Retorna el historial cargado de Firestore
+    return jsonify(historical_rates_in_memory)
 
 scheduler = BackgroundScheduler(timezone="America/Caracas")
 

@@ -1,8 +1,17 @@
 {
+<<<<<<< HEAD
     "usd": 115.3279,
     "eur": 134.85752658,
     "ut": 43.0,
     "last_updated": "2025-07-14 09:24:28",
     "usd_change_percent": 0.72,
     "eur_change_percent": 0.22
+=======
+    "usd": 117.4036,
+    "eur": 136.15999913,
+    "ut": 43.0,
+    "last_updated": "2025-07-17 10:41:59",
+    "usd_change_percent": 2.64,
+    "eur_change_percent": 0.88
+>>>>>>> a22eeedbe79249bf59d743d59724854ab04ccee0
 }
