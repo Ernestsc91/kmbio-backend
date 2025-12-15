@@ -4,7 +4,6 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import os
-import re
 import json
 from apscheduler.schedulers.background import BackgroundScheduler
 import firebase_admin
@@ -67,20 +66,17 @@ def fetch_binance_usdt():
     """Calcula promedio de USDT/VES (15 Buy + 15 Sell) de Binance P2P"""
     url = "https://p2p.binance.com/bapi/c2c/v2/public/c2c/adv/search"
     
-    # --- CORRECCIÓN 1: HEADERS COMPLETOS ---
     headers = {
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-        "Origin": "https://p2p.binance.com",
-        "Referer": "https://p2p.binance.com/en/trade/all/USDT",
-        "Cache-Control": "no-cache"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Origin": "https://p2p.binance.com"
     }
     
     prices = []
     
     try:
         for trade_type in ["BUY", "SELL"]:
-            # --- CORRECCIÓN 2: PAYLOAD ROBUSTO ---
+            # Payload ajustado para mayor compatibilidad
             payload = {
                 "asset": "USDT",
                 "fiat": "VES",
@@ -88,35 +84,29 @@ def fetch_binance_usdt():
                 "page": 1,
                 "rows": 15,
                 "tradeType": trade_type,
-                "publisherType": None,
-                "payTypes": [],      # Importante agregarlo
-                "countries": []      # Importante agregarlo
+                "payTypes": [],
+                "countries": [],
+                "publisherType": None
             }
             
-            # Timeout aumentado ligeramente a 15s por si hay latencia en la API
-            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            resp = requests.post(url, headers=headers, json=payload, timeout=10)
             
-            # Verificamos si la respuesta es exitosa
             if resp.status_code == 200:
                 data = resp.json()
-                
-                # Binance devuelve 'code': '000000' si es exitoso
                 if data and "data" in data and isinstance(data["data"], list):
                     for ad in data["data"]:
-                        # Validamos que exista la estructura 'adv' y 'price'
                         if "adv" in ad and "price" in ad["adv"]:
                             prices.append(float(ad["adv"]["price"]))
                 else:
-                    logger.warning(f"Binance devolvió estructura inesperada para {trade_type}: {data.get('message', 'Sin mensaje')}")
+                    logger.warning(f"Binance devolvió estructura vacía para {trade_type}")
             else:
-                logger.error(f"Error HTTP Binance {resp.status_code}: {resp.text}")
+                logger.error(f"Error HTTP Binance {resp.status_code}")
         
         if prices:
             avg_price = sum(prices) / len(prices)
-            logger.info(f"Binance USDT Promedio ({len(prices)} órdenes): {avg_price}")
+            logger.info(f"Binance USDT Promedio calculado: {avg_price}")
             return avg_price
         
-        logger.warning("No se encontraron precios en Binance.")
         return None
 
     except Exception as e:
@@ -127,20 +117,23 @@ def fetch_binance_usdt():
 def update_rates_logic(only_usdt=False):
     global current_rates_in_memory, historical_rates_in_memory
     
-    # 1. Recuperar valores actuales o usar default
+    # IMPORTANTE: Asegurar que tenemos datos base antes de actualizar parcialmente
+    if not current_rates_in_memory:
+        load_rates_from_firestore()
+
+    # 1. Recuperar valores actuales de la memoria para no perderlos
     usd_rate = current_rates_in_memory.get('usd', DEFAULT_USD_RATE)
     eur_rate = current_rates_in_memory.get('eur', DEFAULT_EUR_RATE)
     usdt_rate = current_rates_in_memory.get('usdt', DEFAULT_USDT_RATE)
 
-    # 2. Actualizar USDT (Siempre que se ejecute esta función)
+    # 2. Actualizar USDT
     new_usdt = fetch_binance_usdt()
-    if new_usdt:
+    if new_usdt and new_usdt > 0.1: # Validación simple
         usdt_rate = new_usdt
 
-    # 3. Actualizar BCV (Solo si NO es solo USDT, es decir, actualización diaria)
+    # 3. Actualizar BCV (Solo si no es modo solo USDT)
     if not only_usdt:
         try:
-            # verify=False es necesario en Render para BCV
             resp = requests.get(BCV_URL, timeout=30, verify=False)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, 'lxml')
@@ -161,26 +154,28 @@ def update_rates_logic(only_usdt=False):
         except Exception as e:
             logger.error(f"Error BCV scraping: {e}")
 
-    # 4. Calcular Porcentajes de Cambio (Vs Ayer)
+    # 4. Calcular Porcentajes
     usd_pct, eur_pct, usdt_pct = 0.0, 0.0, 0.0
     today_str = datetime.now(VENEZUELA_TZ).strftime("%d de %B de %Y")
     
     prev_usd, prev_eur, prev_usdt = None, None, None
     
-    # Buscar en historial el día diferente a hoy
+    # Buscar el día anterior más reciente en el historial
     if historical_rates_in_memory:
         for entry in historical_rates_in_memory:
+            # Asumimos que la primera entrada que no sea hoy es la anterior
             if entry.get("date") != today_str:
                 prev_usd = entry.get("usd")
                 prev_eur = entry.get("eur")
                 prev_usdt = entry.get("usdt")
                 break
     
-    if prev_usd: usd_pct = ((usd_rate - prev_usd) / prev_usd) * 100
-    if prev_eur: eur_pct = ((eur_rate - prev_eur) / prev_eur) * 100
-    if prev_usdt: usdt_pct = ((usdt_rate - prev_usdt) / prev_usdt) * 100
+    # Calcular porcentajes si existen datos previos y no son cero
+    if prev_usd and prev_usd > 0: usd_pct = ((usd_rate - prev_usd) / prev_usd) * 100
+    if prev_eur and prev_eur > 0: eur_pct = ((eur_rate - prev_eur) / prev_eur) * 100
+    if prev_usdt and prev_usdt > 0: usdt_pct = ((usdt_rate - prev_usdt) / prev_usdt) * 100
 
-    # 5. Construir objeto de datos (Claves fijas y limpias)
+    # 5. Construir objeto
     new_data = {
         "usd": usd_rate,
         "eur": eur_rate,
@@ -197,11 +192,13 @@ def update_rates_logic(only_usdt=False):
     if db:
         db.collection('rates').document('current').set(current_rates_in_memory)
         
-        # Historial (Solo si es la actualización diaria completa)
+        # Historial (Solo en actualización completa diaria)
         if not only_usdt:
             should_save_history = False
-            if not historical_rates_in_memory: should_save_history = True
-            elif historical_rates_in_memory[0]["date"] != today_str: should_save_history = True
+            if not historical_rates_in_memory: 
+                should_save_history = True
+            elif historical_rates_in_memory[0]["date"] != today_str: 
+                should_save_history = True
             
             if should_save_history:
                 historical_rates_in_memory.insert(0, {
@@ -210,28 +207,30 @@ def update_rates_logic(only_usdt=False):
                     "eur": eur_rate,
                     "usdt": usdt_rate
                 })
-                historical_rates_in_memory = historical_rates_in_memory[:30] # Max 30 días
+                historical_rates_in_memory = historical_rates_in_memory[:30]
                 db.collection('rates').document('history').set({'data': historical_rates_in_memory})
 
-# Wrappers para el Scheduler
+# Jobs
 def job_daily_bcv():
+    logger.info("Ejecutando Job Diario BCV...")
     update_rates_logic(only_usdt=False)
 
 def job_usdt_update():
+    logger.info("Ejecutando Job USDT...")
     update_rates_logic(only_usdt=True)
 
-# --- RUTAS API ---
+# Rutas
 @app.route('/', methods=['GET'])
 def index():
     return "API Kmbio Vzla Activa", 200
 
 @app.route('/api/bcv-rates', methods=['GET'])
 def get_rates():
-    # Si está vacío, intentar cargar o actualizar
     if not current_rates_in_memory:
         load_rates_from_firestore()
+    # Si sigue vacío tras cargar DB, forzar update completo
     if not current_rates_in_memory:
-        job_daily_bcv() # Forzar actualización si sigue vacío
+        job_daily_bcv()
         
     return jsonify(current_rates_in_memory)
 
@@ -241,24 +240,19 @@ def get_history():
         load_rates_from_firestore()
     return jsonify(historical_rates_in_memory)
 
-# --- ARRANQUE ---
-# Carga inicial fuera del main para Gunicorn
+# Arranque
 try:
     load_rates_from_firestore()
-    # Si después de cargar de DB sigue vacío, ejecutar lógica
-    if not current_rates_in_memory:
-        job_daily_bcv()
-        
     scheduler = BackgroundScheduler(timezone="America/Caracas")
     if not scheduler.running:
-        # BCV todos los días a las 00:01 AM
-        scheduler.add_job(job_daily_bcv, 'cron', hour=0, minute=1)
-        # USDT cada 30 minutos
-        scheduler.add_job(job_usdt_update, 'interval', minutes=30)
+        # BCV a las 6am y 6pm por seguridad
+        scheduler.add_job(job_daily_bcv, 'cron', hour=6, minute=10)
+        scheduler.add_job(job_daily_bcv, 'cron', hour=18, minute=10)
+        # USDT cada 15 minutos
+        scheduler.add_job(job_usdt_update, 'interval', minutes=15)
         scheduler.start()
-        logger.info("Scheduler iniciado.")
 except Exception as e:
-    logger.error(f"Error en arranque: {e}")
+    logger.error(f"Error scheduler: {e}")
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
