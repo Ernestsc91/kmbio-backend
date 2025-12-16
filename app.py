@@ -61,11 +61,10 @@ def load_rates_from_firestore():
             doc = db.collection('rates').document('current').get()
             if doc.exists:
                 current_rates_in_memory = doc.to_dict()
-                # logger.info("Datos sincronizados desde Firestore.")
             else:
                 current_rates_in_memory = DEFAULT_RATES.copy()
 
-            # Cargar Historial (Solo si la lista en memoria está vacía para no saturar lecturas)
+            # Cargar Historial
             if not historical_rates_in_memory:
                 hist_doc = db.collection('rates').document('history').get()
                 if hist_doc.exists and 'data' in hist_doc.to_dict():
@@ -113,24 +112,46 @@ def fetch_binance_usdt():
 def update_rates_logic(only_usdt=False):
     global current_rates_in_memory
     
-    # 1. Sincronizar primero para tener la base más reciente
+    # 1. Sincronizar primero
     load_rates_from_firestore()
     
     usd_rate = current_rates_in_memory.get('usd', 0.01)
     eur_rate = current_rates_in_memory.get('eur', 0.01)
     usdt_rate = current_rates_in_memory.get('usdt', 0.01)
+    
+    bcv_official_date_str = None
+    bcv_date_object = None # Variable para almacenar el objeto fecha real para comparación
 
     # 2. Actualizar USDT
     new_usdt = fetch_binance_usdt()
     if new_usdt and new_usdt > 1.0:
         usdt_rate = new_usdt
 
-    # 3. Actualizar BCV
+    # 3. Actualizar BCV (Scraping + Fecha Oficial)
     if not only_usdt:
         try:
             resp = requests.get(BCV_URL, timeout=30, verify=False) 
             if resp.status_code == 200:
                 soup = BeautifulSoup(resp.text, 'lxml')
+                
+                # --- EXTRAER FECHA OFICIAL DEL HTML ---
+                date_span = soup.find('span', class_='date-display-single')
+                if date_span and date_span.has_attr('content'):
+                    try:
+                        # ISO format: "2025-12-16T00:00:00-04:00"
+                        raw_date = date_span['content'].split('T')[0] 
+                        dt_obj = datetime.strptime(raw_date, "%Y-%m-%d")
+                        
+                        # Guardamos el objeto fecha para comparar matemáticamente
+                        bcv_date_object = dt_obj.date()
+                        
+                        meses_es = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+                        bcv_official_date_str = f"{dt_obj.day} de {meses_es[dt_obj.month - 1]} de {dt_obj.year}"
+                        
+                    except Exception as e:
+                        logger.error(f"Error parseando fecha BCV: {e}")
+
+                # Extraer tasas (Solo tomamos los valores, no guardamos todavía)
                 usd_div = soup.find('div', id='dolar')
                 if usd_div: usd_rate = float(usd_div.find('strong').text.strip().replace(',', '.'))
                 eur_div = soup.find('div', id='euro')
@@ -138,9 +159,28 @@ def update_rates_logic(only_usdt=False):
         except Exception as e:
             logger.error(f"Error BCV: {e}")
 
-    # 4. Calcular Porcentajes (Simplificado)
     now_vzla = datetime.now(VENEZUELA_TZ)
-    today_str = now_vzla.strftime("%d de %B de %Y")
+    
+    # --- LOGICA CRITICA: BLOQUEO DE FECHA FUTURA (LUNES BANCARIO) ---
+    # Si tenemos una fecha oficial del BCV y esa fecha es MAYOR a hoy (Futuro), NO actualizamos.
+    # Ejemplo: Hoy es Lunes 15. BCV dice Martes 16. (16 > 15) -> STOP.
+    if bcv_date_object:
+        today_date = now_vzla.date()
+        if bcv_date_object > today_date:
+            logger.info(f"DETENIDO: La tasa del BCV es para el futuro ({bcv_official_date_str}). Se mantiene la tasa actual en Frontend.")
+            
+            # Sin embargo, SI podemos actualizar el USDT que es tiempo real.
+            # Actualizamos solo USDT en memoria y base de datos, pero NO tocamos USD/EUR ni fecha BCV
+            current_rates_in_memory['usdt'] = usdt_rate
+            # Mantenemos last_updated para que se sepa que el sistema corre, pero la data BCV no cambia
+            current_rates_in_memory['last_updated'] = now_vzla.strftime("%Y-%m-%d %H:%M:%S")
+            
+            if db:
+                db.collection('rates').document('current').set(current_rates_in_memory)
+            return # Salimos de la función aquí para no guardar historial futuro ni cambiar tasas oficiales
+            
+    # Si la fecha es Hoy o Pasada, o no se pudo leer (fallback), continuamos normal:
+    final_date_str = bcv_official_date_str if bcv_official_date_str else now_vzla.strftime("%d de %B de %Y")
     
     # Guardar cambios
     new_data = {
@@ -149,10 +189,9 @@ def update_rates_logic(only_usdt=False):
         "usdt": usdt_rate,
         "ut": 43.00,
         "last_updated": now_vzla.strftime("%Y-%m-%d %H:%M:%S"),
-        # Mantenemos lógica de porcentajes básica o en 0 si falla historial
         "usd_change_percent": current_rates_in_memory.get('usd_change_percent', 0),
         "eur_change_percent": current_rates_in_memory.get('eur_change_percent', 0),
-        "usdt_change_percent": 0.0 # Eliminado porcentaje USDT según solicitud anterior
+        "usdt_change_percent": 0.0
     }
     
     current_rates_in_memory = new_data
@@ -161,13 +200,22 @@ def update_rates_logic(only_usdt=False):
     if db:
         try:
             db.collection('rates').document('current').set(current_rates_in_memory)
-            logger.info(f"Guardado en Firebase: USDT={usdt_rate}")
+            logger.info(f"Guardado en Firebase: {final_date_str} - USD:{usd_rate}")
             
-            # Guardar historial si es actualización completa y cambio de día
             if not only_usdt:
-                load_rates_from_firestore() # Refrescar historial
-                if not historical_rates_in_memory or historical_rates_in_memory[0].get("date") != today_str:
-                    new_hist = {"date": today_str, "usd": usd_rate, "eur": eur_rate, "usdt": usdt_rate}
+                load_rates_from_firestore()
+                
+                should_save_history = False
+                if not historical_rates_in_memory:
+                    should_save_history = True
+                else:
+                    last_entry = historical_rates_in_memory[0]
+                    # Solo guardar en historial si la fecha oficial cambió respecto al último registro
+                    if last_entry.get("date") != final_date_str:
+                        should_save_history = True
+
+                if should_save_history:
+                    new_hist = {"date": final_date_str, "usd": usd_rate, "eur": eur_rate, "usdt": usdt_rate}
                     historical_rates_in_memory.insert(0, new_hist)
                     db.collection('rates').document('history').set({'data': historical_rates_in_memory[:30]})
         except Exception as e:
@@ -175,6 +223,7 @@ def update_rates_logic(only_usdt=False):
 
 # Jobs
 def job_daily_bcv():
+    # Lunes a Viernes
     update_rates_logic(only_usdt=False)
 
 def job_usdt_update():
@@ -183,12 +232,10 @@ def job_usdt_update():
 # Rutas
 @app.route('/', methods=['GET'])
 def index():
-    return "API Kmbio Vzla v2.2 OK", 200
+    return "API Kmbio Vzla v2.5 (DateGuard Active)", 200
 
 @app.route('/api/bcv-rates', methods=['GET'])
 def get_rates():
-    # CORRECCIÓN CRÍTICA: SIEMPRE leer de Firebase al recibir petición
-    # Esto asegura que si el Job corrió en otro worker, este worker tenga el dato nuevo.
     load_rates_from_firestore() 
     return jsonify(current_rates_in_memory)
 
@@ -202,7 +249,7 @@ if __name__ != '__main__':
         load_rates_from_firestore()
         scheduler = BackgroundScheduler(timezone="America/Caracas")
         if not scheduler.running:
-            scheduler.add_job(job_daily_bcv, 'cron', hour=0, minute=1)
+            scheduler.add_job(job_daily_bcv, 'cron', day_of_week='mon-fri', hour=0, minute=1)
             scheduler.add_job(job_usdt_update, 'interval', minutes=15)
             scheduler.start()
     except Exception as e:
