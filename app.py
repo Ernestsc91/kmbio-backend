@@ -110,7 +110,7 @@ def fetch_binance_usdt():
 
 # --- LÓGICA DE ACTUALIZACIÓN ---
 def update_rates_logic(only_usdt=False):
-    global current_rates_in_memory
+    global current_rates_in_memory, historical_rates_in_memory
     
     # 1. Sincronizar primero
     load_rates_from_firestore()
@@ -118,6 +118,16 @@ def update_rates_logic(only_usdt=False):
     usd_rate = current_rates_in_memory.get('usd', 0.01)
     eur_rate = current_rates_in_memory.get('eur', 0.01)
     usdt_rate = current_rates_in_memory.get('usdt', 0.01)
+
+    # Obtener valores "anteriores" para calcular el porcentaje. 
+    # Usamos el historial porque representa el "cierre anterior".
+    prev_usd = usd_rate
+    prev_eur = eur_rate
+    
+    if historical_rates_in_memory and len(historical_rates_in_memory) > 0:
+        last_hist = historical_rates_in_memory[0]
+        prev_usd = last_hist.get('usd', usd_rate)
+        prev_eur = last_hist.get('eur', eur_rate)
     
     bcv_official_date_str = None
     bcv_date_object = None # Variable para almacenar el objeto fecha real para comparación
@@ -181,6 +191,15 @@ def update_rates_logic(only_usdt=False):
             
     # Si la fecha es Hoy o Pasada, o no se pudo leer (fallback), continuamos normal:
     final_date_str = bcv_official_date_str if bcv_official_date_str else now_vzla.strftime("%d de %B de %Y")
+
+    # --- CÁLCULO MATEMÁTICO DE PORCENTAJES ---
+    # Fórmula: ((Nuevo - Viejo) / Viejo) * 100
+    try:
+        usd_change = ((usd_rate - prev_usd) / prev_usd) * 100 if prev_usd > 0 else 0.0
+        eur_change = ((eur_rate - prev_eur) / prev_eur) * 100 if prev_eur > 0 else 0.0
+    except:
+        usd_change = 0.0
+        eur_change = 0.0
     
     # Guardar cambios
     new_data = {
@@ -189,8 +208,8 @@ def update_rates_logic(only_usdt=False):
         "usdt": usdt_rate,
         "ut": 43.00,
         "last_updated": now_vzla.strftime("%Y-%m-%d %H:%M:%S"),
-        "usd_change_percent": current_rates_in_memory.get('usd_change_percent', 0),
-        "eur_change_percent": current_rates_in_memory.get('eur_change_percent', 0),
+        "usd_change_percent": round(usd_change, 2), # Aquí guardamos el cálculo nuevo
+        "eur_change_percent": round(eur_change, 2), # Aquí guardamos el cálculo nuevo
         "usdt_change_percent": 0.0
     }
     
