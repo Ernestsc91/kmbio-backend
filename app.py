@@ -102,7 +102,7 @@ def clean_data_average(prices):
         
     return sum(trimmed_prices) / len(trimmed_prices)
 
-# --- FUNCIÓN: Binance P2P (Optimizada con Filtros y Limpieza) ---
+# --- FUNCIÓN: Binance P2P (Ajustada al modelo de mercado real) ---
 def fetch_binance_usdt():
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
     headers = {
@@ -111,49 +111,54 @@ def fetch_binance_usdt():
         "Clienttype": "web"
     }
     
-    clean_averages = []
+    averages = {}
 
     try:
-        # Consultar COMPRA y VENTA por separado
+        # Consultamos COMPRA y VENTA
         for trade_type in ["BUY", "SELL"]:
             payload = {
                 "asset": "USDT", 
                 "fiat": "VES", 
-                "merchantCheck": True,       # Novedad: SOLO comerciantes verificados
+                "merchantCheck": False,      # FALSE: Incluimos a todos para obtener la tasa de calle
                 "page": 1, 
-                "rows": 10,                  # Novedad: Reducimos a las 10 mejores ofertas
+                "rows": 10,                  # Tomamos las 10 mejores ofertas
                 "tradeType": trade_type, 
                 "transAmount": 0, 
-                "payTypes": ["PagoMovil"]    # Novedad: SOLO filtramos por Pago Móvil
+                "payTypes": ["PagoMovil"]    # Mantenemos el filtro clave de Pago Móvil
             }
             time.sleep(random.uniform(0.1, 0.5))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                side_prices = []
+                prices = []
                 
                 if data.get("code") == "000000" and "data" in data:
                     for ad in data["data"]:
                         try:
                             price = float(ad["adv"]["price"])
                             if price > 0: 
-                                side_prices.append(price)
+                                prices.append(price)
                         except: 
                             continue
                 
-                # Pasamos los precios de este lado por la "Aspiradora de Outliers"
-                if side_prices:
-                    clean_avg = clean_data_average(side_prices)
-                    if clean_avg > 0:
-                        clean_averages.append(clean_avg)
-                        logger.info(f"Binance Promedio Limpio ({trade_type}): {clean_avg}")
+                if prices:
+                    # Limpieza suave: Si hay suficientes datos, quitamos solo 1 de cada extremo
+                    # para eliminar ofertas engañosas (outliers extremos)
+                    if len(prices) >= 5:
+                        prices.sort()
+                        prices = prices[1:-1] 
+                    
+                    # Sacamos el promedio de ese lado
+                    avg = sum(prices) / len(prices)
+                    averages[trade_type] = avg
+                    logger.info(f"Promedio {trade_type}: {avg}")
         
-        # Si logramos obtener promedios limpios de ambos lados, sacamos el punto medio
-        if clean_averages:
-            final_avg = sum(clean_averages) / len(clean_averages)
-            # Redondeamos a 2 decimales para mayor limpieza visual
+        # Calculamos la tasa final promediando la Compra y la Venta
+        if "BUY" in averages and "SELL" in averages:
+            final_avg = (averages["BUY"] + averages["SELL"]) / 2
             final_avg_rounded = round(final_avg, 2)
+            
             logger.info(f"Binance Promedio TOTAL Kmbio Vzla: {final_avg_rounded}")
             return final_avg_rounded
             
