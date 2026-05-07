@@ -303,7 +303,7 @@ if __name__ != '__main__':
         if not scheduler.running:
             # CAMBIO: day_of_week='mon-sun' para que corra sábados y domingos
             scheduler.add_job(job_daily_bcv, 'cron', day_of_week='mon-sun', hour=0, minute=1)
-            scheduler.add_job(job_usdt_update, 'interval', minutes=15)
+            scheduler.add_job(job_usdt_update, 'cron', minute='0,15,30,45')
             scheduler.start()
     except Exception as e:
         logger.error(f"Error scheduler: {e}")
