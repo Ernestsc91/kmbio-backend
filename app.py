@@ -75,7 +75,7 @@ def load_rates_from_firestore():
             logger.error(f"Error cargando Firestore: {e}")
 
 # --- FUNCIÓN: Binance P2P ---
-# --- FUNCIÓN: Binance P2P (Algoritmo Corregido: Sin alteración de orden) ---
+# --- FUNCIÓN: Binance P2P (Sincronizada con el Mercado Verificado) ---
 def fetch_binance_usdt():
     global current_rates_in_memory
     
@@ -99,12 +99,12 @@ def fetch_binance_usdt():
             payload = {
                 "asset": "USDT", 
                 "fiat": "VES", 
-                "merchantCheck": False,      
+                "merchantCheck": True,       # EL SECRETO: Solo comerciantes verificados
                 "page": 1, 
-                "rows": 5,                   # Solo necesitamos los 5 primeros
+                "rows": 5,                   # Los 5 mejores comerciantes
                 "tradeType": trade_type, 
                 "transAmount": monto_minimo_ves,  
-                "payTypes": []               # Sin restricciones para leer la liquidez total
+                "payTypes": ["PagoMovil"]    # Estricto Pago Movil para evitar tasas bajas de transferencias
             }
             time.sleep(random.uniform(0.5, 1.5))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -123,14 +123,13 @@ def fetch_binance_usdt():
                             continue
                 
                 if prices:
-                    if len(prices) >= 4:
-                        # LA MAGIA ESTÁ AQUÍ:
-                        # No usamos sort(). Binance ya nos da el orden correcto.
-                        # Ignoramos el índice 0 (el gancho) y tomamos del 1 al 3.
-                        precios_solidos = prices[1:4] 
+                    if len(prices) >= 3:
+                        # Al usar comerciantes verificados, la lista es confiable desde el principio.
+                        # Tomamos directamente a los 3 mejores cambistas y los promediamos.
+                        precios_solidos = prices[0:3] 
                         avg = sum(precios_solidos) / len(precios_solidos)
                         averages[trade_type] = avg
-                        logger.info(f"Top 5 {trade_type} (Crudo): {prices} -> Bloque Sólido Evaluado: {precios_solidos} -> Promedio: {avg}")
+                        logger.info(f"Top 5 Verificados {trade_type}: {prices} -> Bloque evaluado: {precios_solidos} -> Promedio: {avg}")
                     else:
                         avg = sum(prices) / len(prices)
                         averages[trade_type] = avg
