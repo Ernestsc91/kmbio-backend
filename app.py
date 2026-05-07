@@ -102,14 +102,26 @@ def clean_data_average(prices):
         
     return sum(trimmed_prices) / len(trimmed_prices)
 
-# --- FUNCIÓN: Binance P2P (Ajustada al modelo de mercado real) ---
+# --- FUNCIÓN: Binance P2P (Mediana Comercial + Filtro Dinámico de 10$) ---
 def fetch_binance_usdt():
+    # Llamamos a las variables globales para acceder a tu tasa del BCV
+    global current_rates_in_memory
+    
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Content-Type": "application/json",
         "Clienttype": "web"
     }
+    
+    # --- CÁLCULO DINÁMICO AJUSTADO A 10$ ---
+    # Obtenemos la tasa USD actual guardada en memoria. Si no existe, usamos 496 como respaldo.
+    tasa_usd_actual = current_rates_in_memory.get('usd', 496.0)
+    if tasa_usd_actual < 1: 
+        tasa_usd_actual = 496.0
+        
+    # Filtro de liquidez indexado a 10 USDT para mantener la relevancia ante la inflación
+    monto_minimo_ves = int(tasa_usd_actual * 10)
     
     averages = {}
 
@@ -119,14 +131,14 @@ def fetch_binance_usdt():
             payload = {
                 "asset": "USDT", 
                 "fiat": "VES", 
-                "merchantCheck": False,      # FALSE: Incluimos a todos para obtener la tasa de calle
+                "merchantCheck": False,      
                 "page": 1, 
-                "rows": 10,                  # Tomamos las 10 mejores ofertas
+                "rows": 5,                   
                 "tradeType": trade_type, 
-                "transAmount": 0, 
-                "payTypes": ["PagoMovil"]    # Mantenemos el filtro clave de Pago Móvil
+                "transAmount": monto_minimo_ves,  # Filtro dinámico de 10$
+                "payTypes": []               
             }
-            time.sleep(random.uniform(0.1, 0.5))
+            time.sleep(random.uniform(0.5, 1.5))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
@@ -143,23 +155,18 @@ def fetch_binance_usdt():
                             continue
                 
                 if prices:
-                    # Limpieza suave: Si hay suficientes datos, quitamos solo 1 de cada extremo
-                    # para eliminar ofertas engañosas (outliers extremos)
-                    if len(prices) >= 5:
-                        prices.sort()
-                        prices = prices[1:-1] 
-                    
-                    # Sacamos el promedio de ese lado
-                    avg = sum(prices) / len(prices)
-                    averages[trade_type] = avg
-                    logger.info(f"Promedio {trade_type}: {avg}")
+                    # Aplicamos la Mediana para ignorar precios "gancho"
+                    prices.sort()
+                    mediana = prices[len(prices) // 2]
+                    averages[trade_type] = mediana
+                    logger.info(f"Top 5 {trade_type} (Filtro > {monto_minimo_ves} Bs): {prices} -> Mediana: {mediana}")
         
-        # Calculamos la tasa final promediando la Compra y la Venta
+        # Promediamos ambas medianas para la tasa final de Kmbio Vzla
         if "BUY" in averages and "SELL" in averages:
             final_avg = (averages["BUY"] + averages["SELL"]) / 2
             final_avg_rounded = round(final_avg, 2)
             
-            logger.info(f"Binance Promedio TOTAL Kmbio Vzla: {final_avg_rounded}")
+            logger.info(f"Binance Tasa Final (Filtro 10$): {final_avg_rounded}")
             return final_avg_rounded
             
         return None
