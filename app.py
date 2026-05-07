@@ -74,72 +74,55 @@ def load_rates_from_firestore():
         except Exception as e:
             logger.error(f"Error cargando Firestore: {e}")
 
-# --- FUNCIÓN: Binance P2P ---
-# --- FUNCIÓN: Binance P2P (Sincronizada con el Mercado Verificado) ---
+# --- FUNCIÓN: Binance P2P (Algoritmo de Alta Reputación - Calibración Real) ---
 def fetch_binance_usdt():
     global current_rates_in_memory
-    
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Content-Type": "application/json",
-        "Clienttype": "web"
-    }
+    headers = {"User-Agent": "Mozilla/5.0", "Content-Type": "application/json", "Clienttype": "web"}
     
     tasa_usd_actual = current_rates_in_memory.get('usd', 496.0)
-    if tasa_usd_actual < 1: 
-        tasa_usd_actual = 496.0
-        
-    monto_minimo_ves = int(tasa_usd_actual * 100)
+    monto_minimo_ves = int(tasa_usd_actual * 10) # Volvamos a 10$ para capturar el mercado retail
     
     averages = {}
 
     try:
         for trade_type in ["BUY", "SELL"]:
             payload = {
-                "asset": "USDT", 
-                "fiat": "VES", 
-                "merchantCheck": True,       # EL SECRETO: Solo comerciantes verificados
-                "page": 1, 
-                "rows": 5,                   # Los 5 mejores comerciantes
+                "asset": "USDT", "fiat": "VES", 
+                "merchantCheck": False,      # Apagamos esto para ver la tasa real de calle
+                "page": 1, "rows": 15,       # Pedimos más filas para poder filtrar nosotros
                 "tradeType": trade_type, 
-                "transAmount": monto_minimo_ves,  
-                "payTypes": ["PagoMovil"]    # Estricto Pago Movil para evitar tasas bajas de transferencias
+                "transAmount": monto_minimo_ves, 
+                "payTypes": ["PagoMovil"]
             }
-            time.sleep(random.uniform(0.5, 1.5))
+            time.sleep(random.uniform(0.5, 1.0))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
                 prices = []
-                
                 if data.get("code") == "000000" and "data" in data:
                     for ad in data["data"]:
-                        try:
+                        # --- FILTRO DE REPUTACIÓN PROFESIONAL ---
+                        trades = int(ad["advertiser"].get("monthOrderCount", 0))
+                        rate = float(ad["advertiser"].get("monthFinishRate", 0)) * 100
+                        
+                        # Solo tomamos gente con más de 80 trades y 94% de éxito
+                        if trades >= 80 and rate >= 94:
                             price = float(ad["adv"]["price"])
-                            if price > 0: 
-                                prices.append(price)
-                        except: 
-                            continue
+                            prices.append(price)
                 
-                if prices:
-                    if len(prices) >= 3:
-                        # Al usar comerciantes verificados, la lista es confiable desde el principio.
-                        # Tomamos directamente a los 3 mejores cambistas y los promediamos.
-                        precios_solidos = prices[0:3] 
-                        avg = sum(precios_solidos) / len(precios_solidos)
-                        averages[trade_type] = avg
-                        logger.info(f"Top 5 Verificados {trade_type}: {prices} -> Bloque evaluado: {precios_solidos} -> Promedio: {avg}")
-                    else:
-                        avg = sum(prices) / len(prices)
-                        averages[trade_type] = avg
+                if len(prices) >= 3:
+                    # Usamos el bloque sólido (del 2 al 5) para eliminar los ganchos del principio
+                    # y los anuncios de relleno al final
+                    precios_solidos = prices[1:4] 
+                    avg = sum(precios_solidos) / len(precios_solidos)
+                    averages[trade_type] = avg
+                    logger.info(f"Filtro Reputación {trade_type}: {precios_solidos} -> Avg: {avg}")
         
         if "BUY" in averages and "SELL" in averages:
             final_avg = (averages["BUY"] + averages["SELL"]) / 2
-            final_avg_rounded = round(final_avg, 2)
-            
-            logger.info(f"Binance Tasa Kmbio Vzla Definitiva: {final_avg_rounded}")
-            return final_avg_rounded
+            return round(final_avg, 2)
             
         return None
     except Exception as e:
