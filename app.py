@@ -90,7 +90,7 @@ def fetch_binance_usdt():
     if tasa_usd_actual < 1: 
         tasa_usd_actual = 496.0
         
-    monto_minimo_ves = int(tasa_usd_actual * 10)
+    monto_minimo_ves = int(tasa_usd_actual * 100)
     
     averages = {}
 
