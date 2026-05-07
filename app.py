@@ -75,6 +75,34 @@ def load_rates_from_firestore():
             logger.error(f"Error cargando Firestore: {e}")
 
 # --- FUNCIÓN: Binance P2P ---
+# --- FUNCIÓN AUXILIAR: Limpieza de Outliers ---
+def clean_data_average(prices):
+    """
+    Toma una lista de precios, elimina el 20% más alto y el 20% más bajo (outliers),
+    y devuelve el promedio de los valores centrales.
+    """
+    if not prices:
+        return 0
+    if len(prices) < 4:
+        # Si hay muy pocos datos, no recortamos, solo promediamos
+        return sum(prices) / len(prices)
+    
+    # Ordenamos los precios de menor a mayor
+    prices.sort()
+    
+    # Calculamos cuántos elementos recortar de cada lado (20%)
+    trim_count = max(1, int(len(prices) * 0.2))
+    
+    # Extraemos solo los valores del medio
+    trimmed_prices = prices[trim_count:-trim_count]
+    
+    # Por seguridad, si el recorte deja la lista vacía, usamos la original
+    if not trimmed_prices:
+        return sum(prices) / len(prices)
+        
+    return sum(trimmed_prices) / len(trimmed_prices)
+
+# --- FUNCIÓN: Binance P2P (Optimizada con Filtros y Limpieza) ---
 def fetch_binance_usdt():
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
     headers = {
@@ -82,30 +110,53 @@ def fetch_binance_usdt():
         "Content-Type": "application/json",
         "Clienttype": "web"
     }
-    all_prices = []
+    
+    clean_averages = []
+
     try:
-        # Consultar COMPRA y VENTA (15 ofertas cada uno)
+        # Consultar COMPRA y VENTA por separado
         for trade_type in ["BUY", "SELL"]:
             payload = {
-                "asset": "USDT", "fiat": "VES", "merchantCheck": False, "page": 1, "rows": 15, 
-                "tradeType": trade_type, "transAmount": 0, "payTypes": []
+                "asset": "USDT", 
+                "fiat": "VES", 
+                "merchantCheck": True,       # Novedad: SOLO comerciantes verificados
+                "page": 1, 
+                "rows": 10,                  # Novedad: Reducimos a las 10 mejores ofertas
+                "tradeType": trade_type, 
+                "transAmount": 0, 
+                "payTypes": ["PagoMovil"]    # Novedad: SOLO filtramos por Pago Móvil
             }
             time.sleep(random.uniform(0.1, 0.5))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
+            
             if response.status_code == 200:
                 data = response.json()
+                side_prices = []
+                
                 if data.get("code") == "000000" and "data" in data:
                     for ad in data["data"]:
                         try:
                             price = float(ad["adv"]["price"])
-                            if price > 0: all_prices.append(price)
-                        except: continue
+                            if price > 0: 
+                                side_prices.append(price)
+                        except: 
+                            continue
+                
+                # Pasamos los precios de este lado por la "Aspiradora de Outliers"
+                if side_prices:
+                    clean_avg = clean_data_average(side_prices)
+                    if clean_avg > 0:
+                        clean_averages.append(clean_avg)
+                        logger.info(f"Binance Promedio Limpio ({trade_type}): {clean_avg}")
         
-        # Si hay resultados (aunque sean menos de 15), calculamos promedio
-        if all_prices:
-            avg_price = sum(all_prices) / len(all_prices)
-            logger.info(f"Binance Promedio calculado: {avg_price} ({len(all_prices)} ofertas)")
-            return avg_price
+        # Si logramos obtener promedios limpios de ambos lados, sacamos el punto medio
+        if clean_averages:
+            final_avg = sum(clean_averages) / len(clean_averages)
+            # Redondeamos a 2 decimales para mayor limpieza visual
+            final_avg_rounded = round(final_avg, 2)
+            logger.info(f"Binance Promedio TOTAL Kmbio Vzla: {final_avg_rounded}")
+            return final_avg_rounded
+            
         return None
     except Exception as e:
         logger.error(f"Error Binance: {e}")
