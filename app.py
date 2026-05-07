@@ -75,36 +75,8 @@ def load_rates_from_firestore():
             logger.error(f"Error cargando Firestore: {e}")
 
 # --- FUNCIÓN: Binance P2P ---
-# --- FUNCIÓN AUXILIAR: Limpieza de Outliers ---
-def clean_data_average(prices):
-    """
-    Toma una lista de precios, elimina el 20% más alto y el 20% más bajo (outliers),
-    y devuelve el promedio de los valores centrales.
-    """
-    if not prices:
-        return 0
-    if len(prices) < 4:
-        # Si hay muy pocos datos, no recortamos, solo promediamos
-        return sum(prices) / len(prices)
-    
-    # Ordenamos los precios de menor a mayor
-    prices.sort()
-    
-    # Calculamos cuántos elementos recortar de cada lado (20%)
-    trim_count = max(1, int(len(prices) * 0.2))
-    
-    # Extraemos solo los valores del medio
-    trimmed_prices = prices[trim_count:-trim_count]
-    
-    # Por seguridad, si el recorte deja la lista vacía, usamos la original
-    if not trimmed_prices:
-        return sum(prices) / len(prices)
-        
-    return sum(trimmed_prices) / len(trimmed_prices)
-
-# --- FUNCIÓN: Binance P2P (Mediana Comercial + Filtro Dinámico de 10$) ---
+# --- FUNCIÓN: Binance P2P (Algoritmo Corregido: Sin alteración de orden) ---
 def fetch_binance_usdt():
-    # Llamamos a las variables globales para acceder a tu tasa del BCV
     global current_rates_in_memory
     
     url = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
@@ -114,29 +86,25 @@ def fetch_binance_usdt():
         "Clienttype": "web"
     }
     
-    # --- CÁLCULO DINÁMICO AJUSTADO A 10$ ---
-    # Obtenemos la tasa USD actual guardada en memoria. Si no existe, usamos 496 como respaldo.
     tasa_usd_actual = current_rates_in_memory.get('usd', 496.0)
     if tasa_usd_actual < 1: 
         tasa_usd_actual = 496.0
         
-    # Filtro de liquidez indexado a 10 USDT para mantener la relevancia ante la inflación
     monto_minimo_ves = int(tasa_usd_actual * 10)
     
     averages = {}
 
     try:
-        # Consultamos COMPRA y VENTA
         for trade_type in ["BUY", "SELL"]:
             payload = {
                 "asset": "USDT", 
                 "fiat": "VES", 
                 "merchantCheck": False,      
                 "page": 1, 
-                "rows": 5,                   
+                "rows": 5,                   # Solo necesitamos los 5 primeros
                 "tradeType": trade_type, 
-                "transAmount": monto_minimo_ves,  # Filtro dinámico de 10$
-                "payTypes": []               
+                "transAmount": monto_minimo_ves,  
+                "payTypes": []               # Sin restricciones para leer la liquidez total
             }
             time.sleep(random.uniform(0.5, 1.5))
             response = requests.post(url, json=payload, headers=headers, timeout=10)
@@ -155,18 +123,23 @@ def fetch_binance_usdt():
                             continue
                 
                 if prices:
-                    # Aplicamos la Mediana para ignorar precios "gancho"
-                    prices.sort()
-                    mediana = prices[len(prices) // 2]
-                    averages[trade_type] = mediana
-                    logger.info(f"Top 5 {trade_type} (Filtro > {monto_minimo_ves} Bs): {prices} -> Mediana: {mediana}")
+                    if len(prices) >= 4:
+                        # LA MAGIA ESTÁ AQUÍ:
+                        # No usamos sort(). Binance ya nos da el orden correcto.
+                        # Ignoramos el índice 0 (el gancho) y tomamos del 1 al 3.
+                        precios_solidos = prices[1:4] 
+                        avg = sum(precios_solidos) / len(precios_solidos)
+                        averages[trade_type] = avg
+                        logger.info(f"Top 5 {trade_type} (Crudo): {prices} -> Bloque Sólido Evaluado: {precios_solidos} -> Promedio: {avg}")
+                    else:
+                        avg = sum(prices) / len(prices)
+                        averages[trade_type] = avg
         
-        # Promediamos ambas medianas para la tasa final de Kmbio Vzla
         if "BUY" in averages and "SELL" in averages:
             final_avg = (averages["BUY"] + averages["SELL"]) / 2
             final_avg_rounded = round(final_avg, 2)
             
-            logger.info(f"Binance Tasa Final (Filtro 10$): {final_avg_rounded}")
+            logger.info(f"Binance Tasa Kmbio Vzla Definitiva: {final_avg_rounded}")
             return final_avg_rounded
             
         return None
